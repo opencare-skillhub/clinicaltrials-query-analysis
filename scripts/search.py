@@ -1,0 +1,661 @@
+#!/usr/bin/env python3
+"""
+ClinicalTrials.gov API v2 搜索工具
+===================================
+
+支持关键词、时间范围、国家多维度筛选，输出临床试验列表及智能总结。
+
+用法:
+    python3 search.py --keyword "KRAS G12D"
+    python3 search.py --keyword "pancreatic cancer" --start-date 2024-01-01 --country China
+    python3 search.py --keyword "BRCA1" --start-date 2023-01-01 --end-date 2025-06-01 --country "United States" --max-results 100
+"""
+
+from __future__ import annotations
+
+import argparse
+import asyncio
+import json
+import logging
+import sys
+from collections import Counter
+from datetime import datetime
+from typing import Any
+
+try:
+    import httpx
+except ImportError:
+    print("错误: 需要安装 httpx 库。请运行: pip install httpx")
+    sys.exit(1)
+
+# ---------------------------------------------------------------------------
+# 常量
+# ---------------------------------------------------------------------------
+_BASE_URL = "https://clinicaltrials.gov/api/v2/studies"
+_DEFAULT_PAGE_SIZE = 100
+_REQUEST_TIMEOUT = 30.0
+_MAX_RETRIES = 3
+_RETRY_DELAY = 1.0
+
+# 已知胰腺癌/肿瘤 Biomarker（用于从入排标准中提取）
+_BIOMARKER_PATTERNS: list[tuple[str, str]] = [
+    ("KRAS G12C", "KRAS G12C"),
+    ("KRAS G12D", "KRAS G12D"),
+    ("KRAS G12V", "KRAS G12V"),
+    ("KRAS G12R", "KRAS G12R"),
+    ("KRAS G12A", "KRAS G12A"),
+    ("KRAS G13D", "KRAS G13D"),
+    ("KRAS Q61H", "KRAS Q61H"),
+    ("KRAS", "KRAS"),
+    ("NRAS", "NRAS"),
+    ("HRAS", "HRAS"),
+    ("BRAF V600E", "BRAF V600E"),
+    ("BRAF", "BRAF"),
+    ("BRCA1", "BRCA1"),
+    ("BRCA2", "BRCA2"),
+    ("BRCA", "BRCA1/2"),
+    ("PALB2", "PALB2"),
+    ("ATM", "ATM"),
+    ("MSI-H", "MSI-H/dMMR"),
+    ("MICROSATELLITE INSTABILITY-HIGH", "MSI-H/dMMR"),
+    ("MICROSATELLITE INSTABILITY", "MSI-H/dMMR"),
+    ("DMMR", "MSI-H/dMMR"),
+    ("MISMATCH REPAIR DEFICIENT", "MSI-H/dMMR"),
+    ("NTRK", "NTRK fusion"),
+    ("HER2", "HER2+"),
+    ("ERBB2", "HER2+"),
+    ("TP53", "TP53"),
+    ("SMAD4", "SMAD4"),
+    ("CDKN2A", "CDKN2A"),
+    ("PIK3CA", "PIK3CA"),
+    ("PTEN", "PTEN"),
+    ("NRG1", "NRG1 fusion"),
+    ("FGFR2", "FGFR2"),
+    ("ALK", "ALK"),
+    ("ROS1", "ROS1"),
+    ("RET", "RET"),
+    ("MET", "MET"),
+    ("TMB-H", "TMB-H"),
+    ("TUMOR MUTATIONAL BURDEN-HIGH", "TMB-H"),
+    ("TUMOR MUTATIONAL BURDEN", "TMB-H"),
+    ("MLH1", "Lynch (MLH1)"),
+    ("MSH2", "Lynch (MSH2)"),
+    ("MSH6", "Lynch (MSH6)"),
+    ("PMS2", "Lynch (PMS2)"),
+    ("EGFR", "EGFR"),
+    ("VEGF", "VEGF"),
+    ("PD-L1", "PD-L1"),
+    ("PD-1", "PD-1/PD-L1"),
+    ("CTLA-4", "CTLA-4"),
+    ("CAR-T", "CAR-T"),
+    ("TCR-T", "TCR-T"),
+]
+
+logging.basicConfig(level=logging.WARNING, format="%(levelname)s: %(message)s")
+logger = logging.getLogger(__name__)
+
+
+# ---------------------------------------------------------------------------
+# API 客户端
+# ---------------------------------------------------------------------------
+class ClinicalTrialsSearch:
+    """ClinicalTrials.gov API v2 搜索客户端。"""
+
+    def __init__(self, timeout: float = _REQUEST_TIMEOUT) -> None:
+        self._client = httpx.AsyncClient(timeout=timeout)
+
+    async def aclose(self) -> None:
+        await self._client.aclose()
+
+    async def search(
+        self,
+        keyword: str,
+        start_date: str | None = None,
+        end_date: str | None = None,
+        country: str | None = None,
+        status: str | None = None,
+        max_results: int = 50,
+    ) -> list[dict[str, Any]]:
+        """
+        搜索临床试验。
+
+        Parameters
+        ----------
+        keyword : str
+            搜索关键词（基因、疾病、药物等）。
+        start_date : str | None
+            起始日期 (YYYY-MM-DD)，筛选此日期之后启动的试验。
+        end_date : str | None
+            结束日期 (YYYY-MM-DD)，筛选此日期之前启动的试验。
+        country : str | None
+            试验开展国家（英文名称，如 China, United States, Japan）。
+        status : str | None
+            招募状态筛选，默认 RECRUITING,ACTIVE_NOT_RECRUITING。
+        max_results : int
+            最大返回结果数。
+
+        Returns
+        -------
+        list[dict]
+            结构化的临床试验列表。
+        """
+        if status is None:
+            status = "RECRUITING,ACTIVE_NOT_RECRUITING"
+
+        all_trials: list[dict[str, Any]] = []
+        page_token: str | None = None
+        page_size = min(max_results, 100)
+
+        while len(all_trials) < max_results:
+            params = self._build_params(
+                keyword=keyword,
+                start_date=start_date,
+                end_date=end_date,
+                country=country,
+                status=status,
+                page_size=page_size,
+                page_token=page_token,
+            )
+
+            raw_studies, next_token = await self._fetch_page(params)
+            if not raw_studies:
+                break
+
+            for study in raw_studies:
+                parsed = self._parse_study(study)
+                if parsed:
+                    all_trials.append(parsed)
+                if len(all_trials) >= max_results:
+                    break
+
+            page_token = next_token
+            if not page_token:
+                break
+
+        return all_trials[:max_results]
+
+    def _build_params(
+        self,
+        keyword: str,
+        start_date: str | None,
+        end_date: str | None,
+        country: str | None,
+        status: str,
+        page_size: int,
+        page_token: str | None = None,
+    ) -> dict[str, Any]:
+        """构建 API 请求参数。"""
+        params: dict[str, Any] = {
+            "filter.overallStatus": status,
+            "pageSize": str(page_size),
+            "fields": ",".join([
+                "NCTId",
+                "BriefTitle",
+                "OfficialTitle",
+                "Phase",
+                "OverallStatus",
+                "Condition",
+                "InterventionName",
+                "InterventionType",
+                "EligibilityCriteria",
+                "LeadSponsorName",
+                "StartDate",
+                "LocationCountry",
+                "LocationCity",
+                "LocationFacility",
+                "LastUpdatePostDate",
+            ]),
+            "format": "json",
+            "markupFormat": "legacy",
+        }
+
+        # 关键词搜索 — 用 query.term 支持自由文本
+        query_parts = []
+
+        # 核心关键词
+        query_parts.append(keyword)
+
+        # 时间范围 — 使用 AREA[StartDate]RANGE 语法
+        if start_date or end_date:
+            start = start_date or "MIN"
+            end = end_date or "MAX"
+            query_parts.append(f"AREA[StartDate]RANGE[{start},{end}]")
+
+        params["query.term"] = " AND ".join(query_parts)
+
+        # 国家筛选 — 使用 query.locn
+        if country:
+            params["query.locn"] = country
+
+        if page_token:
+            params["pageToken"] = page_token
+
+        return params
+
+    async def _fetch_page(
+        self, params: dict[str, Any]
+    ) -> tuple[list[dict[str, Any]], str | None]:
+        """获取单页结果，返回 (studies, next_page_token)。"""
+        for attempt in range(1, _MAX_RETRIES + 1):
+            try:
+                resp = await self._client.get(_BASE_URL, params=params)
+                resp.raise_for_status()
+                data = resp.json()
+                studies = data.get("studies", [])
+                next_token = data.get("nextPageToken")
+                return studies, next_token
+
+            except httpx.HTTPStatusError as exc:
+                logger.warning(
+                    "ClinicalTrials.gov returned %d (attempt %d/%d)",
+                    exc.response.status_code,
+                    attempt,
+                    _MAX_RETRIES,
+                )
+                if exc.response.status_code == 429:
+                    await asyncio.sleep(_RETRY_DELAY * attempt * 2)
+                elif exc.response.status_code >= 500:
+                    await asyncio.sleep(_RETRY_DELAY * attempt)
+                else:
+                    break
+
+            except (httpx.RequestError, httpx.DecodingError) as exc:
+                logger.warning(
+                    "Request failed (attempt %d/%d): %s",
+                    attempt,
+                    _MAX_RETRIES,
+                    exc,
+                )
+                await asyncio.sleep(_RETRY_DELAY * attempt)
+
+        logger.error("Fetch failed after %d attempts", _MAX_RETRIES)
+        return [], None
+
+    def _parse_study(self, study: dict[str, Any]) -> dict[str, Any] | None:
+        """解析单个试验为结构化字典。"""
+        try:
+            protocol = study.get("protocolSection", {})
+            id_mod = protocol.get("identificationModule", {})
+            status_mod = protocol.get("statusModule", {})
+            arms_mod = protocol.get("armsInterventionsModule", {})
+            elig_mod = protocol.get("eligibilityModule", {})
+            sponsor_mod = protocol.get("sponsorCollaboratorsModule", {})
+            contacts_mod = protocol.get("contactsLocationsModule", {})
+
+            nct_id = id_mod.get("nctId", "")
+            if not nct_id:
+                return None
+
+            title = id_mod.get("briefTitle", "") or id_mod.get("officialTitle", "")
+
+            # 阶段
+            phase_list = id_mod.get("phase", [])
+            if isinstance(phase_list, list):
+                phase = "/".join(phase_list) if phase_list else "Not specified"
+            else:
+                phase = str(phase_list) if phase_list else "Not specified"
+
+            # 状态
+            trial_status = status_mod.get("overallStatus", "Unknown")
+
+            # 适应症
+            conditions_list = id_mod.get("conditions", [])
+            conditions = " | ".join(conditions_list) if conditions_list else ""
+
+            # 干预措施
+            interventions_list = arms_mod.get("interventions", [])
+            drug_names = []
+            for iv in interventions_list:
+                name = iv.get("name", "")
+                itype = iv.get("type", "")
+                if name and itype == "DRUG":
+                    drug_names.append(name)
+            all_interventions = []
+            for iv in interventions_list:
+                name = iv.get("name", "")
+                itype = iv.get("type", "")
+                if name:
+                    all_interventions.append(f"{name} ({itype})" if itype else name)
+
+            # 申办方
+            sponsor = sponsor_mod.get("leadSponsor", {}).get("name", "")
+
+            # 日期
+            start_date_struct = status_mod.get("startDateStruct", {})
+            start_date = start_date_struct.get("date", "") if start_date_struct else ""
+            last_update = status_mod.get("lastUpdatePostDateStruct", {}).get("date", "")
+
+            # 地点（国家列表）
+            locations = contacts_mod.get("locations", [])
+            countries = []
+            cities = []
+            for loc in locations:
+                country = loc.get("country", "")
+                city = loc.get("city", "")
+                if country and country not in countries:
+                    countries.append(country)
+                if city and city not in cities:
+                    cities.append(city)
+
+            # Biomarker 提取
+            eligibility_text = elig_mod.get("eligibilityCriteria", "")
+            biomarker = self._extract_biomarker(eligibility_text, conditions)
+
+            return {
+                "nct_id": nct_id,
+                "title": title,
+                "phase": phase,
+                "status": trial_status,
+                "conditions": conditions,
+                "drugs": drug_names,
+                "interventions": "; ".join(all_interventions),
+                "sponsor": sponsor,
+                "start_date": start_date,
+                "last_update": last_update,
+                "countries": countries,
+                "cities": cities[:5],  # 最多显示5个城市
+                "biomarker": biomarker,
+                "url": f"https://clinicaltrials.gov/study/{nct_id}",
+            }
+        except Exception as exc:
+            logger.warning("Failed to parse study: %s", exc)
+            return None
+
+    @staticmethod
+    def _extract_biomarker(eligibility: str, conditions: str) -> str:
+        """从入排标准和适应症中提取 Biomarker 关键词。"""
+        text = f"{eligibility} {conditions}".upper()
+        found = []
+        for keyword, label in _BIOMARKER_PATTERNS:
+            # 跳过已被更具体匹配覆盖的泛匹配
+            if any(label in f for f in found):
+                continue
+            if keyword in text:
+                found.append(label)
+        return ", ".join(found) if found else ""
+
+
+# ---------------------------------------------------------------------------
+# 结果展示与总结
+# ---------------------------------------------------------------------------
+def print_trials_table(trials: list[dict[str, Any]]) -> None:
+    """打印临床试验表格。"""
+    if not trials:
+        print("\n⚠️  未找到匹配的临床试验。\n")
+        return
+
+    print(f"\n{'='*100}")
+    print(f"  临床试验搜索结果（共 {len(trials)} 条）")
+    print(f"{'='*100}\n")
+
+    for i, t in enumerate(trials, 1):
+        # 状态 emoji
+        status_icon = {
+            "RECRUITING": "🟢",
+            "ACTIVE_NOT_RECRUITING": "🟡",
+            "COMPLETED": "✅",
+            "TERMINATED": "🔴",
+            "WITHDRAWN": "⚫",
+            "SUSPENDED": "🟠",
+            "NOT_YET_RECRUITING": "⚪",
+        }.get(t["status"], "❓")
+
+        status_cn = {
+            "RECRUITING": "招募中",
+            "ACTIVE_NOT_RECRUITING": "暂停招募",
+            "COMPLETED": "已完成",
+            "TERMINATED": "已终止",
+            "WITHDRAWN": "已撤回",
+            "SUSPENDED": "暂停",
+            "NOT_YET_RECRUITING": "尚未招募",
+        }.get(t["status"], t["status"])
+
+        print(f"  {i}. [{t['nct_id']}] {t['title']}")
+        print(f"     阶段: {t['phase']}  |  状态: {status_icon} {status_cn}")
+
+        if t["drugs"]:
+            drugs_str = ", ".join(t["drugs"][:6])
+            if len(t["drugs"]) > 6:
+                drugs_str += f" ... (+{len(t['drugs'])-6})"
+            print(f"     药物: {drugs_str}")
+
+        if t["biomarker"]:
+            print(f"     Biomarker: {t['biomarker']}")
+
+        if t["sponsor"]:
+            print(f"     申办方: {t['sponsor']}")
+
+        if t["countries"]:
+            country_str = ", ".join(t["countries"][:5])
+            if len(t["countries"]) > 5:
+                country_str += f" ... (+{len(t['countries'])-5})"
+            print(f"     国家: {country_str}")
+
+        if t["start_date"]:
+            print(f"     启动日期: {t['start_date']}")
+
+        print(f"     🔗 {t['url']}")
+        print()
+
+
+def print_summary(trials: list[dict[str, Any]], keyword: str) -> None:
+    """打印智能总结。"""
+    if not trials:
+        return
+
+    print(f"\n{'='*100}")
+    print(f"  📊 智能总结 — 关键词: \"{keyword}\"")
+    print(f"{'='*100}\n")
+
+    # 1. 搜索结果统计
+    status_counter = Counter(t["status"] for t in trials)
+    status_cn = {
+        "RECRUITING": "招募中",
+        "ACTIVE_NOT_RECRUITING": "暂停招募",
+        "COMPLETED": "已完成",
+        "TERMINATED": "已终止",
+        "WITHDRAWN": "已撤回",
+        "SUSPENDED": "暂停",
+        "NOT_YET_RECRUITING": "尚未招募",
+    }
+    print(f"  📈 搜索结果统计: 共 {len(trials)} 条试验")
+    for status, count in status_counter.most_common():
+        cn = status_cn.get(status, status)
+        print(f"     • {cn} ({status}): {count}")
+    print()
+
+    # 2. 临床阶段分布
+    phase_counter = Counter(t["phase"] for t in trials)
+    print("  📋 临床阶段分布:")
+    for phase, count in phase_counter.most_common():
+        bar = "█" * count
+        print(f"     • {phase}: {count} {bar}")
+    print()
+
+    # 3. Biomarker 分布
+    biomarker_counter: Counter[str] = Counter()
+    for t in trials:
+        if t["biomarker"]:
+            for bm in t["biomarker"].split(", "):
+                biomarker_counter[bm] += 1
+    if biomarker_counter:
+        print("  🎯 Biomarker / 靶点分布:")
+        for bm, count in biomarker_counter.most_common(15):
+            bar = "█" * count
+            print(f"     • {bm}: {count} {bar}")
+        print()
+
+    # 4. 热门药物
+    drug_counter: Counter[str] = Counter()
+    for t in trials:
+        for drug in t["drugs"]:
+            drug_counter[drug] += 1
+    if drug_counter:
+        print("  💊 热门药物/干预措施 Top 15:")
+        for drug, count in drug_counter.most_common(15):
+            bar = "█" * count
+            print(f"     • {drug}: {count} {bar}")
+        print()
+
+    # 5. 地区分布
+    country_counter: Counter[str] = Counter()
+    for t in trials:
+        for c in t["countries"]:
+            country_counter[c] += 1
+    if country_counter:
+        print("  🌍 地区分布 Top 10:")
+        for c, count in country_counter.most_common(10):
+            bar = "█" * count
+            print(f"     • {c}: {count} {bar}")
+        print()
+
+    # 6. 申办方分布
+    sponsor_counter: Counter[str] = Counter()
+    for t in trials:
+        if t["sponsor"]:
+            sponsor_counter[t["sponsor"]] += 1
+    if sponsor_counter:
+        print("  🏢 申办方 Top 10:")
+        for sp, count in sponsor_counter.most_common(10):
+            print(f"     • {sp}: {count}")
+        print()
+
+    # 7. 关键发现摘要
+    print("  🔑 关键发现:")
+    findings = []
+
+    # 最热门的阶段
+    if phase_counter:
+        top_phase = phase_counter.most_common(1)[0]
+        findings.append(f"  最集中阶段为 {top_phase[0]}（{top_phase[1]} 项）")
+
+    # 招募中比例
+    recruiting = status_counter.get("RECRUITING", 0)
+    if recruiting:
+        pct = recruiting / len(trials) * 100
+        findings.append(f"  招募中试验占 {pct:.0f}%（{recruiting}/{len(trials)}）")
+
+    # 热门靶点
+    if biomarker_counter:
+        top_bm = biomarker_counter.most_common(3)
+        bm_str = ", ".join(f"{bm}({cnt})" for bm, cnt in top_bm)
+        findings.append(f"  最热门靶点: {bm_str}")
+
+    # 热门药物
+    if drug_counter:
+        top_drugs = drug_counter.most_common(3)
+        drug_str = ", ".join(f"{d}({cnt})" for d, cnt in top_drugs)
+        findings.append(f"  最热门药物: {drug_str}")
+
+    # 涉及国家数
+    if country_counter:
+        findings.append(f"  试验覆盖 {len(country_counter)} 个国家/地区")
+
+    for f in findings:
+        print(f"     • {f}")
+    print()
+
+
+# ---------------------------------------------------------------------------
+# CLI 入口
+# ---------------------------------------------------------------------------
+async def main() -> None:
+    parser = argparse.ArgumentParser(
+        description="ClinicalTrials.gov 临床试验搜索工具",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+示例:
+  %(prog)s --keyword "KRAS G12D"
+  %(prog)s --keyword "pancreatic cancer" --start-date 2024-01-01 --country China
+  %(prog)s --keyword "BRCA1" --start-date 2023-01-01 --end-date 2025-06-01 --country "United States"
+  %(prog)s --keyword "免疫治疗 胰腺癌" --max-results 100
+        """,
+    )
+    parser.add_argument(
+        "--keyword", "-k",
+        required=True,
+        help="搜索关键词（基因名、疾病名、药物名等）",
+    )
+    parser.add_argument(
+        "--start-date", "-s",
+        default=None,
+        help="起始日期 (YYYY-MM-DD)，筛选此日期之后启动的试验",
+    )
+    parser.add_argument(
+        "--end-date", "-e",
+        default=None,
+        help="结束日期 (YYYY-MM-DD)，筛选此日期之前启动的试验",
+    )
+    parser.add_argument(
+        "--country", "-c",
+        default=None,
+        help="试验开展国家（英文名称，如 China, United States, Japan）",
+    )
+    parser.add_argument(
+        "--status",
+        default=None,
+        help="招募状态筛选（默认: RECRUITING,ACTIVE_NOT_RECRUITING）",
+    )
+    parser.add_argument(
+        "--max-results", "-n",
+        type=int,
+        default=50,
+        help="最大返回结果数（默认 50，上限 1000）",
+    )
+    parser.add_argument(
+        "--json",
+        action="store_true",
+        help="以 JSON 格式输出（便于程序调用）",
+    )
+
+    args = parser.parse_args()
+
+    # 验证日期格式
+    for date_str, label in [(args.start_date, "start-date"), (args.end_date, "end-date")]:
+        if date_str:
+            try:
+                datetime.strptime(date_str, "%Y-%m-%d")
+            except ValueError:
+                print(f"错误: {label} 格式不正确，请使用 YYYY-MM-DD")
+                sys.exit(1)
+
+    # 限制最大结果数
+    max_results = min(args.max_results, 1000)
+
+    # 搜索参数展示（输出到 stderr，避免干扰 JSON 输出）
+    out = print if not args.json else lambda *a, **kw: print(*a, **{**kw, "file": sys.stderr})
+    out(f"\n🔍 搜索条件:")
+    out(f"   关键词: {args.keyword}")
+    if args.start_date:
+        out(f"   开始日期: {args.start_date}")
+    if args.end_date:
+        out(f"   结束日期: {args.end_date}")
+    if args.country:
+        out(f"   国家: {args.country}")
+    if args.status:
+        out(f"   状态: {args.status}")
+    out(f"   最大结果数: {max_results}")
+    out(f"\n⏳ 正在搜索 ClinicalTrials.gov ...")
+
+    client = ClinicalTrialsSearch()
+    try:
+        trials = await client.search(
+            keyword=args.keyword,
+            start_date=args.start_date,
+            end_date=args.end_date,
+            country=args.country,
+            status=args.status,
+            max_results=max_results,
+        )
+    finally:
+        await client.aclose()
+
+    if args.json:
+        print(json.dumps(trials, ensure_ascii=False, indent=2))
+    else:
+        print_trials_table(trials)
+        print_summary(trials, args.keyword)
+
+
+if __name__ == "__main__":
+    asyncio.run(main())
