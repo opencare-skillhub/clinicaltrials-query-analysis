@@ -216,5 +216,4 @@ MIT License
 
 ## 🙏 致谢
 
-- [ClinicalTrials.gov](https://clinicaltrials.gov/) — 美国国家医学图书馆（NLM）提供的免费公开 API
-- 数据来源：U.S. National Library of Medicine
+小胰宝开源社区志愿者的❤️贡献
