@@ -210,195 +210,29 @@ query.term = KRAS G12D AND AREA[StartDate]RANGE[2023-01-01,2025-12-31]
 - Python 3.10+
 - httpx（异步 HTTP 客户端）
 
-## 🤖 AI Agent 部署指南
+## 🤖 AI Agent 部署提示词
 
-### OpenClaw
+将以下提示词发给 Codex / OpenClaw / Hermes 等 AI 编程助手，即可自动完成部署：
 
-**1. 安装技能**
+**OpenClaw：**
 
-```bash
-# 从 GitHub 安装
-clawdhub install clinicaltrials-query-analysis
-
-# 或手动复制
-git clone https://github.com/opencare-skillhub/clinicaltrials-query-analysis.git ~/.openclaw/skills/clinicaltrials-search
+```
+请从 https://github.com/opencare-skillhub/clinicaltrials-query-analysis.git 克隆并安装 clinicaltrials-search 技能到 ~/.openclaw/skills/ 目录，安装 httpx 依赖（pip install httpx），然后用 python3 scripts/search.py --keyword "KRAS G12D" -n 3 验证可用，确认输出试验列表和智能总结即可。
 ```
 
-**2. 提示词**（写入 `~/.openclaw/workspace/TOOLS.md`）
+**Codex CLI：**
 
-```markdown
-## ClinicalTrials Search Skill
-
-Search ClinicalTrials.gov for clinical trials by keyword, date range, and country.
-
-### When to use
-- User asks about clinical trials for a gene/disease/drug
-- User wants to find trials in a specific country or time period
-- User needs trial statistics or biomarker analysis
-
-### How to use
-Run the search script with appropriate parameters:
-
-python3 {baseDir}/scripts/search.py --keyword "QUERY" [--start-date YYYY-MM-DD] [--end-date YYYY-MM-DD] [--country COUNTRY] [--max-results N] [--json]
-
-### Examples
-- "KRAS G12D试验" → python3 {baseDir}/scripts/search.py -k "KRAS G12D"
-- "过去90天中国的胰腺癌试验" → python3 {baseDir}/scripts/search.py -k "pancreatic cancer" -s 2026-04-04 -c China
-- "ATR抑制剂试验JSON" → python3 {baseDir}/scripts/search.py -k "ATR inhibitor" --json
-
-### Notes
-- No API key required (free public API)
-- Default status filter: RECRUITING,ACTIVE_NOT_RECRUITING
-- Use --json for programmatic consumption (output to stdout, logs to stderr)
-- Built-in 40+ biomarker auto-extraction from eligibility criteria
+```
+请从 https://github.com/opencare-skillhub/clinicaltrials-query-analysis.git 克隆到当前项目的 ./skills/clinicaltrials-search 目录，安装 httpx 依赖，然后运行 python3 ./skills/clinicaltrials-search/scripts/search.py --keyword "KRAS G12D" -n 3 验证脚本能正常返回试验列表和总结，确认无误即可。
 ```
 
-**3. 验证安装**
+**Hermes：**
 
-```bash
-openclaw status | grep clinicaltrials
-python3 ~/.openclaw/skills/clinicaltrials-search/scripts/search.py -k "KRAS G12D" -n 3
+```
+请从 https://github.com/opencare-skillhub/clinicaltrials-query-analysis.git 克隆技能包到 ./skills/clinicaltrials-search，安装 httpx 依赖，运行 python3 ./skills/clinicaltrials-search/scripts/search.py --keyword "KRAS G12D" -n 3 验证输出正常（应包含临床试验列表和智能总结），确认部署成功。
 ```
 
----
-
-### Codex CLI
-
-**1. 安装技能**
-
-```bash
-git clone https://github.com/opencare-skillhub/clinicaltrials-query-analysis.git ./skills/clinicaltrials-search
-```
-
-**2. 配置**（写入 `.codex/settings.json`）
-
-```json
-{
-  "skills": [
-    {
-      "name": "clinicaltrials-search",
-      "description": "Search ClinicalTrials.gov for clinical trials by keyword, date range, and country with smart biomarker extraction and summary",
-      "path": "./skills/clinicaltrials-search",
-      "commands": {
-        "search": "python3 ./skills/clinicaltrials-search/scripts/search.py --keyword \"{query}\" --json"
-      }
-    }
-  ]
-}
-```
-
-**3. 系统提示词**（写入 `.codex/instructions.md`）
-
-```markdown
-## ClinicalTrials Search
-
-You have access to a ClinicalTrials.gov search skill. Use it when the user asks about:
-- Clinical trials for specific genes (KRAS G12D, BRCA1, ATM, etc.)
-- Trials in specific countries or time periods
-- Drug development landscape for a target
-- Biomarker distribution across trials
-
-### Command
-python3 ./skills/clinicaltrials-search/scripts/search.py --keyword "QUERY" [--start-date YYYY-MM-DD] [--end-date YYYY-MM-DD] [--country COUNTRY] [--max-results N]
-
-### Output
-- Default: interactive table + smart summary (statistics, biomarker distribution, drug ranking, geography)
-- With --json: structured JSON array for programmatic use
-
-### Tips
-- Always include --json when you need to parse results programmatically
-- Use Chinese keywords for better results on Chinese trials
-- Combine keyword + country for focused searches
-```
-
----
-
-### Hermes
-
-**1. 安装技能**
-
-```bash
-git clone https://github.com/opencare-skillhub/clinicaltrials-query-analysis.git ./skills/clinicaltrials-search
-```
-
-**2. 技能注册**（写入 `.hermes/skills.yaml`）
-
-```yaml
-skills:
-  - name: clinicaltrials-search
-    description: "Search ClinicalTrials.gov for clinical trials by keyword, date range, and country. Auto-extracts 40+ biomarkers and generates smart summary with statistics, drug ranking, and geography distribution."
-    path: ./skills/clinicaltrials-search
-    entry: scripts/search.py
-    runtime: python3
-    parameters:
-      - name: keyword
-        required: true
-        description: "Search keyword (gene, disease, drug name)"
-      - name: start-date
-        required: false
-        description: "Start date filter (YYYY-MM-DD)"
-      - name: end-date
-        required: false
-        description: "End date filter (YYYY-MM-DD)"
-      - name: country
-        required: false
-        description: "Trial country (English name)"
-      - name: max-results
-        required: false
-        default: 50
-        description: "Max results (1-1000)"
-      - name: json
-        required: false
-        type: boolean
-        description: "Output as JSON"
-```
-
-**3. 系统提示词**（写入 `.hermes/SYSTEM.md`）
-
-```markdown
-## ClinicalTrials Search Skill
-
-### Activation
-When the user asks about clinical trials, drug development, gene mutations, or trial availability in specific regions, invoke the clinicaltrials-search skill.
-
-### Invocation
-python3 ./skills/clinicaltrials-search/scripts/search.py --keyword "{user_query}" [--start-date DATE] [--country COUNTRY] [--json]
-
-### Response Guidelines
-1. Run the search with the user's keyword
-2. If user specifies a time range, add --start-date and --end-date
-3. If user specifies a country, add --country
-4. Summarize key findings from the output:
-   - Total trials found and recruitment status breakdown
-   - Top biomarkers/targets identified
-   - Leading drugs/interventions
-   - Geographic distribution
-   - Notable findings (e.g., new drug classes, Chinese trial presence)
-5. Provide the trial list in a structured table format
-6. If results are sparse, suggest broadening the search (remove country filter, expand time range)
-
-### Special Cases
-- For KRAS subtypes: search exact mutation (e.g., "KRAS G12D" not just "KRAS")
-- For DDR/HRD trials: search both "ATM ATR inhibitor" and specific drug names
-- For vaccine trials: search "mRNA neoantigen vaccine" or "KRAS vaccine"
-- For Chinese trials specifically: always add --country China
-```
-
----
-
-### 通用 Shell 别名
-
-无论使用哪个 Agent 平台，都可以设置 shell 别名快速调用：
-
-```bash
-# 添加到 ~/.bashrc 或 ~/.zshrc
-alias ctsearch='python3 /path/to/skills/clinicaltrials-search/scripts/search.py'
-
-# 使用
-ctsearch -k "KRAS G12D" -n 20
-ctsearch -k "pancreatic cancer" -c China -s 2025-01-01
-ctsearch -k "ATR inhibitor" --json | jq '.[].nct_id'
-```
+> 三个平台的提示词结构一致：克隆仓库 → 安装依赖 → 运行验证。替换加粗的关键词即可测试不同靶点（如 `BRCA1`、`ATR inhibitor`、`mRNA vaccine`）。
 
 ## 📄 License
 
