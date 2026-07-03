@@ -11,6 +11,7 @@ ClinicalTrials 搜索分析系统 — 交互式菜单入口。
 from __future__ import annotations
 
 import asyncio
+import os
 import sys
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -18,6 +19,29 @@ from pathlib import Path
 # 添加脚本目录到路径
 _SCRIPT_DIR = Path(__file__).resolve().parent
 sys.path.insert(0, str(_SCRIPT_DIR))
+
+_SKILL_ROOT = _SCRIPT_DIR.parent
+
+# 自动加载 .env 文件（如存在）
+def _load_dotenv() -> None:
+    """从 .env 文件加载环境变量（不覆盖已有的）。"""
+    env_path = _SKILL_ROOT / ".env"
+    if not env_path.exists():
+        return
+    with open(env_path, encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if not line or line.startswith("#"):
+                continue
+            if "=" not in line:
+                continue
+            key, _, value = line.partition("=")
+            key = key.strip()
+            value = value.strip()
+            if key and key not in os.environ:
+                os.environ[key] = value
+
+_load_dotenv()
 
 from config_loader import load_config, get_all_genes, get_report_genes, get_genes_by_category
 from search import ClinicalTrialsSearch, print_trials_table, print_summary

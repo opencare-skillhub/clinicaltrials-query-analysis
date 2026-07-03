@@ -1,0 +1,60 @@
+[
+  {
+    "nct_id": "NCT07644559",
+    "title": "A Phase 2 Study of VS-7375 in Patients With KRAS G12D-Mutated Pancreatic Cancer",
+    "phase": "Not specified",
+    "status": "RECRUITING",
+    "conditions": "",
+    "drugs": [
+      "VS-7375",
+      "cetuximab"
+    ],
+    "interventions": "VS-7375 (DRUG); cetuximab (DRUG)",
+    "sponsor": "Verastem, Inc.",
+    "start_date": "2026-06-16",
+    "last_update": "2026-07-02",
+    "countries": [
+      "United States",
+      "Australia"
+    ],
+    "cities": [
+      "Los Angeles",
+      "Tampa",
+      "Baltimore",
+      "Grand Rapids",
+      "St Louis"
+    ],
+    "biomarker": "KRAS G12D, ATM, MET",
+    "url": "https://clinicaltrials.gov/study/NCT07644559",
+    "_gene_id": "ca125",
+    "_gene_name": "CA125 (MUC16)"
+  },
+  {
+    "nct_id": "NCT06412120",
+    "title": "Study Evaluating Safety, Tolerability, and Metabolism of Niraparib",
+    "phase": "Not specified",
+    "status": "RECRUITING",
+    "conditions": "",
+    "drugs": [
+      "Niraparib"
+    ],
+    "interventions": "Niraparib (DRUG)",
+    "sponsor": "University of Miami",
+    "start_date": "2026-06-08",
+    "last_update": "2026-06-23",
+    "countries": [
+      "United States",
+      "Nigeria"
+    ],
+    "cities": [
+      "Fort Lauderdale",
+      "Jacksonville",
+      "Miami",
+      "Zaria"
+    ],
+    "biomarker": "ATM, RET, MET, EGFR",
+    "url": "https://clinicaltrials.gov/study/NCT06412120",
+    "_gene_id": "ca125",
+    "_gene_name": "CA125 (MUC16)"
+  }
+]

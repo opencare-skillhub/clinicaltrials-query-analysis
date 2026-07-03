@@ -1,0 +1,192 @@
+[
+  {
+    "nct_id": "NCT07647250",
+    "title": "Pilot Study to Evaluate Targeted Physical Activity Among Pancreatic Cancer Patients Receiving Neoadjuvant Chemotherapy",
+    "phase": "Not specified",
+    "status": "RECRUITING",
+    "conditions": "",
+    "drugs": [],
+    "interventions": "36-session targeted physical exercise program delivered twice weekly (OTHER)",
+    "sponsor": "University of Illinois at Chicago",
+    "start_date": "2026-06-22",
+    "last_update": "2026-06-24",
+    "countries": [
+      "United States"
+    ],
+    "cities": [
+      "Chicago"
+    ],
+    "biomarker": "",
+    "url": "https://clinicaltrials.gov/study/NCT07647250",
+    "_gene_id": "met",
+    "_gene_name": "C-MET (MET)"
+  },
+  {
+    "nct_id": "NCT07331974",
+    "title": "Efficacy and Safety of Akkermansia Muciniphila AKM Lab-01 for Overweight and Obesity",
+    "phase": "Not specified",
+    "status": "RECRUITING",
+    "conditions": "",
+    "drugs": [
+      "AKM Lab-01",
+      "Placebo"
+    ],
+    "interventions": "AKM Lab-01 (DRUG); Placebo (DRUG)",
+    "sponsor": "Moon (Guangzhou) Biotechnology Co., Ltd.",
+    "start_date": "2026-07-01",
+    "last_update": "2026-06-29",
+    "countries": [
+      "China"
+    ],
+    "cities": [
+      "Guangzhou"
+    ],
+    "biomarker": "ATM, RET, MET",
+    "url": "https://clinicaltrials.gov/study/NCT07331974",
+    "_gene_id": "met",
+    "_gene_name": "C-MET (MET)"
+  },
+  {
+    "nct_id": "NCT07434479",
+    "title": "A Virtual Reality Mindfulness Application for Aggression in Schizophrenia",
+    "phase": "Not specified",
+    "status": "RECRUITING",
+    "conditions": "",
+    "drugs": [],
+    "interventions": "Mindfulness-Based Virtual Reality Intervention (OTHER)",
+    "sponsor": "Manhattan Psychiatric Center",
+    "start_date": "2026-06-05",
+    "last_update": "2026-06-10",
+    "countries": [
+      "United States"
+    ],
+    "cities": [
+      "New York",
+      "White Plains"
+    ],
+    "biomarker": "ATM, MET",
+    "url": "https://clinicaltrials.gov/study/NCT07434479",
+    "_gene_id": "met",
+    "_gene_name": "C-MET (MET)"
+  },
+  {
+    "nct_id": "NCT07624162",
+    "title": "I-scoop vs. C-Mac D-Blade Videolaryngoscope for Airway Management Under Spontaneous Breathing and Analgosedation",
+    "phase": "Not specified",
+    "status": "RECRUITING",
+    "conditions": "",
+    "drugs": [],
+    "interventions": "Airway management under spontaneous breathing with the i-scoop videolaryngoscope (PROCEDURE); Airway management under spontaneous breathing with the C-Mac D-Blade videolaryngoscope (PROCEDURE)",
+    "sponsor": "Hannover Medical School",
+    "start_date": "2026-06-18",
+    "last_update": "2026-06-25",
+    "countries": [
+      "Germany"
+    ],
+    "cities": [
+      "Hanover"
+    ],
+    "biomarker": "MET",
+    "url": "https://clinicaltrials.gov/study/NCT07624162",
+    "_gene_id": "met",
+    "_gene_name": "C-MET (MET)"
+  },
+  {
+    "nct_id": "NCT07364162",
+    "title": "Exogenous Ketone Supplementation in ICU Delirium",
+    "phase": "Not specified",
+    "status": "RECRUITING",
+    "conditions": "",
+    "drugs": [
+      "Ketone monoester",
+      "Placebo"
+    ],
+    "interventions": "Ketone monoester (DRUG); Placebo (DRUG)",
+    "sponsor": "Vanderbilt University Medical Center",
+    "start_date": "2026-06-09",
+    "last_update": "2026-06-15",
+    "countries": [
+      "United States"
+    ],
+    "cities": [
+      "Nashville"
+    ],
+    "biomarker": "ATM, MET",
+    "url": "https://clinicaltrials.gov/study/NCT07364162",
+    "_gene_id": "met",
+    "_gene_name": "C-MET (MET)"
+  },
+  {
+    "nct_id": "NCT07473726",
+    "title": "A Phase I Clinical Study to Evaluate the Safety, Tolerability, and PK of HLX48 in Advanced/Metastatic Solid Tumors",
+    "phase": "Not specified",
+    "status": "RECRUITING",
+    "conditions": "",
+    "drugs": [
+      "HLX48"
+    ],
+    "interventions": "HLX48 (DRUG)",
+    "sponsor": "Shanghai Henlius Biotech",
+    "start_date": "2026-06-30",
+    "last_update": "2026-07-02",
+    "countries": [
+      "Australia",
+      "China"
+    ],
+    "cities": [
+      "North Ryde",
+      "Saint Leonards",
+      "Frankston",
+      "Guangzhou",
+      "Hongkou"
+    ],
+    "biomarker": "ATM, MET, EGFR",
+    "url": "https://clinicaltrials.gov/study/NCT07473726",
+    "_gene_id": "met",
+    "_gene_name": "C-MET (MET)"
+  },
+  {
+    "nct_id": "NCT07643285",
+    "title": "Feasibility and Safety of a Pediatric ERAS Protocol for Laparoscopic Appendectomy",
+    "phase": "Not specified",
+    "status": "RECRUITING",
+    "conditions": "",
+    "drugs": [],
+    "interventions": "Comprehensive 20-Item Pediatric ERAS Protocol (OTHER)",
+    "sponsor": "Ahmet Burak Doğan, MD",
+    "start_date": "2026-06-16",
+    "last_update": "2026-07-01",
+    "countries": [
+      "Turkey (Türkiye)"
+    ],
+    "cities": [
+      "Kayseri"
+    ],
+    "biomarker": "ATM",
+    "url": "https://clinicaltrials.gov/study/NCT07643285",
+    "_gene_id": "met",
+    "_gene_name": "C-MET (MET)"
+  },
+  {
+    "nct_id": "NCT07669168",
+    "title": "Health Ahead Comparative Effectiveness Study",
+    "phase": "Not specified",
+    "status": "RECRUITING",
+    "conditions": "",
+    "drugs": [],
+    "interventions": "Interactive Personalized Health Report (BEHAVIORAL); Mobile Community-Based Health Screenings (BEHAVIORAL); Hybrid Medical Droid and Human Delivered Health Screenings (BEHAVIORAL)",
+    "sponsor": "William Brandenburg, MD",
+    "start_date": "2026-06-09",
+    "last_update": "2026-06-25",
+    "countries": [
+      "United States"
+    ],
+    "cities": [
+      "Boulder"
+    ],
+    "biomarker": "",
+    "url": "https://clinicaltrials.gov/study/NCT07669168",
+    "_gene_id": "met",
+    "_gene_name": "C-MET (MET)"
+  }
+]

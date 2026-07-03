@@ -31,14 +31,36 @@ from typing import Any
 _SCRIPT_DIR = Path(__file__).resolve().parent
 sys.path.insert(0, str(_SCRIPT_DIR))
 
-from config_loader import load_config, get_report_genes, get_llm_config, get_gene_by_id
-from search import ClinicalTrialsSearch
-
 # 路径常量
 _SKILL_ROOT = _SCRIPT_DIR.parent
 _CACHE_DIR = _SKILL_ROOT / "outputs" / "gene_cache"
 _REPORT_DIR = _SKILL_ROOT / "outputs" / "reports"
 _TEMPLATE_PATH = _SKILL_ROOT / "templates" / "report_nccn.md"
+
+# 自动加载 .env 文件（如存在）
+def _load_dotenv() -> None:
+    """从 .env 文件加载环境变量（不覆盖已有的）。"""
+    env_path = _SKILL_ROOT / ".env"
+    if not env_path.exists():
+        return
+    with open(env_path, encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if not line or line.startswith("#"):
+                continue
+            if "=" not in line:
+                continue
+            key, _, value = line.partition("=")
+            key = key.strip()
+            value = value.strip()
+            # 不覆盖已有环境变量
+            if key and key not in os.environ:
+                os.environ[key] = value
+
+_load_dotenv()
+
+from config_loader import load_config, get_report_genes, get_llm_config, get_gene_by_id
+from search import ClinicalTrialsSearch
 
 # 状态中文名
 _STATUS_CN = {

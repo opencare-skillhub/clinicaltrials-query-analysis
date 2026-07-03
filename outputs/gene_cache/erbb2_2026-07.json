@@ -1,0 +1,27 @@
+[
+  {
+    "nct_id": "NCT07630961",
+    "title": "Phase I Study of JFI447 [68Ga]Ga-DFC413 and Comparison to FFG233 [68Ga]Ga-NNS309 in Patients With Solid Tumors",
+    "phase": "Not specified",
+    "status": "RECRUITING",
+    "conditions": "",
+    "drugs": [
+      "68Ga-DFC413",
+      "68Ga-NNS309"
+    ],
+    "interventions": "68Ga-DFC413 (DRUG); 68Ga-NNS309 (DRUG)",
+    "sponsor": "Novartis Pharmaceuticals",
+    "start_date": "2026-06-23",
+    "last_update": "2026-06-26",
+    "countries": [
+      "Japan"
+    ],
+    "cities": [
+      "Chuo Ku"
+    ],
+    "biomarker": "ATM, HER2+, RET, MET",
+    "url": "https://clinicaltrials.gov/study/NCT07630961",
+    "_gene_id": "erbb2",
+    "_gene_name": "HER2 (ERBB2)"
+  }
+]
