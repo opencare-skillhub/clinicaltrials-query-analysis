@@ -55,7 +55,13 @@ _BIOMARKER_PATTERNS: list[tuple[str, str]] = [
     ("BRCA2", "BRCA2"),
     ("BRCA", "BRCA1/2"),
     ("PALB2", "PALB2"),
-    ("ATM", "ATM"),
+    ("ATM MUTATION", "ATM"),
+    ("ATM-DEFICIENT", "ATM"),
+    ("ATM DEFICIENCY", "ATM"),
+    ("ATM LOSS", "ATM"),
+    ("ATM PATHWAY", "ATM"),
+    ("ATM PROTEIN", "ATM"),
+    ("ATM GENE", "ATM"),
     ("MSI-H", "MSI-H/dMMR"),
     ("MICROSATELLITE INSTABILITY-HIGH", "MSI-H/dMMR"),
     ("MICROSATELLITE INSTABILITY", "MSI-H/dMMR"),
@@ -121,6 +127,7 @@ class ClinicalTrialsSearch:
         country: str | None = None,
         status: str | None = None,
         max_results: int = 50,
+        disease: str | None = None,
     ) -> list[dict[str, Any]]:
         """
         搜索临床试验。
@@ -139,6 +146,8 @@ class ClinicalTrialsSearch:
             招募状态筛选，默认 RECRUITING,ACTIVE_NOT_RECRUITING。
         max_results : int
             最大返回结果数。
+        disease : str | None
+            疾病/癌种筛选（如 "pancreatic"）。会自动 AND 到关键词中。
 
         Returns
         -------
@@ -161,6 +170,7 @@ class ClinicalTrialsSearch:
                 status=status,
                 page_size=page_size,
                 page_token=page_token,
+                disease=disease,
             )
 
             raw_studies, next_token = await self._fetch_page(params)
@@ -189,6 +199,7 @@ class ClinicalTrialsSearch:
         status: str,
         page_size: int,
         page_token: str | None = None,
+        disease: str | None = None,
     ) -> dict[str, Any]:
         """构建 API 请求参数。"""
         params: dict[str, Any] = {
@@ -224,6 +235,11 @@ class ClinicalTrialsSearch:
 
         # 核心关键词
         query_parts.append(keyword)
+
+        # 疾病/癌种筛选 — 使用 AREA[Condition] 字段限定
+        # 默认胰腺癌（本技能为胰腺癌临床情报工具）
+        disease_filter = disease if disease else "pancreatic"
+        query_parts.append(f"AREA[Condition]{disease_filter}")
 
         # 时间范围 — 使用 AREA[StartDate]RANGE 语法
         if start_date or end_date:
