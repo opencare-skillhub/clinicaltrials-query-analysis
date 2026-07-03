@@ -14,6 +14,7 @@ NCCN 胰腺癌临床试验月报生成器。
   python3 report_nccn.py                    # 生成月报
   python3 report_nccn.py --no-llm           # 跳过LLM，输出骨架
   python3 report_nccn.py --gene kras        # 仅生成单基因报告
+  python3 report_nccn.py --translate        # 启用标题翻译（默认关闭，LLM分析已为中文）
 """
 
 from __future__ import annotations
@@ -23,6 +24,7 @@ import json
 import os
 import sys
 from collections import Counter
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -61,6 +63,7 @@ _load_dotenv()
 
 from config_loader import load_config, get_report_genes, get_llm_config, get_gene_by_id
 from search import ClinicalTrialsSearch
+from translator import translate_fields
 
 # 状态中文名
 _STATUS_CN = {
@@ -94,7 +97,7 @@ def llm_analyze(prompt: str, config: dict[str, Any], use_llm: bool = True) -> st
 
     llm_cfg = get_llm_config(config)
     if not llm_cfg["api_key"]:
-        return f"> ⚠️ 未配置 LLM_API_KEY，深度分析段落待补充。\n> Prompt: {prompt[:80]}..."
+        return f"> ⚠️ 未配置 LLM API Key（provider={llm_cfg.get('provider','custom')}），深度分析段落待补充。\n> Prompt: {prompt[:80]}..."
 
     try:
         from openai import OpenAI
@@ -112,18 +115,60 @@ def llm_analyze(prompt: str, config: dict[str, Any], use_llm: bool = True) -> st
                 {
                     "role": "system",
                     "content": (
-                        "你是胰腺癌临床研究专家，擅长将临床试验数据转化为病友可理解的深度分析。"
-                        "要求：专业、简洁、无废话和重复，重点给出清晰指引。"
-                        "输出 Markdown 格式，控制在 300-500 字。"
+                        f"当前日期：{datetime.now().strftime('%Y年%m月%d日')}。"
+                        "你是胰腺癌临床研究资深专家，擅长将临床试验数据转化为病友可理解的深度研究分析。"
+                        "要求：1) 使用真实当前日期，严禁编造日期；"
+                        "2) 专业、深入、数据驱动，避免空话套话；"
+                        "3) 重点给出清晰可执行的指引；"
+                        "4) 输出 Markdown 格式，500-800字；"
+                        "5) 如数据不足，明确说明而非编造。"
                     ),
                 },
                 {"role": "user", "content": prompt},
             ],
             temperature=llm_cfg["temperature"],
+            max_tokens=llm_cfg.get("max_tokens", 2000),
         )
         return resp.choices[0].message.content.strip()
     except Exception as exc:
-        return f"> ⚠️ LLM 调用失败: {exc}"
+        return f"> ⚠️ LLM 调用失败 (provider={llm_cfg.get('provider','custom')}): {exc}"
+
+
+# LLM 分析并发数（2并发，兼顾速度与API限流）
+_LLM_CONCURRENCY = 2
+
+
+def llm_analyze_batch(
+    tasks: list[tuple[str, str, dict[str, Any], bool]],
+) -> dict[str, str]:
+    """
+    并发执行多个 LLM 分析任务。
+
+    Parameters
+    ----------
+    tasks : list of (task_id, prompt, config, use_llm)
+
+    Returns
+    -------
+    dict[str, str]
+        {task_id: llm_result}
+    """
+    results: dict[str, str] = {}
+    with ThreadPoolExecutor(max_workers=_LLM_CONCURRENCY) as executor:
+        future_map = {
+            executor.submit(llm_analyze, prompt, cfg, use_llm): task_id
+            for task_id, prompt, cfg, use_llm in tasks
+        }
+        for future in as_completed(future_map):
+            task_id = future_map[future]
+            try:
+                results[task_id] = future.result()
+                print(f"✅({task_id})", end=" ", flush=True)
+            except Exception as exc:
+                results[task_id] = f"> ⚠️ 并发LLM失败: {exc}"
+                print(f"❌({task_id})", end=" ", flush=True)
+    print()
+    return results
 
 
 # ---------------------------------------------------------------------------
@@ -276,9 +321,15 @@ def stats_to_table(stats: dict[str, Any]) -> str:
 # ---------------------------------------------------------------------------
 # 基因专区生成
 # ---------------------------------------------------------------------------
-def format_gene_section(gene: dict[str, Any], trials: list[dict[str, Any]], llm_content: str) -> str:
-    """生成单个基因的分析专区。"""
+def format_gene_section(
+    gene: dict[str, Any],
+    trials: list[dict[str, Any]],
+    llm_content: str,
+    translations: dict[str, dict[str, str]] | None = None,
+) -> str:
+    """生成单个基因的分析专区。支持双语显示和日期字段。"""
     stats = compute_stats(trials)
+    translations = translations or {}
 
     lines = []
     lines.append(f"### {gene['name']}（{gene.get('cn_name', '')}）")
@@ -303,20 +354,31 @@ def format_gene_section(gene: dict[str, Any], trials: list[dict[str, Any]], llm_
         lines.append(f"- **热门药物**：{drug_str}")
     lines.append("")
 
-    # 临床清单（精简表格）
-    lines.append("| NCT ID | 标题 | 阶段 | 状态 | 药物 | 国家 |")
-    lines.append("|--------|------|------|------|------|------|")
+    # 临床清单（双语 + 日期）
+    lines.append("| NCT ID | 标题（中/英） | 阶段 | 状态 | 药物 | 国家 | 📅发布 | 📅更新 |")
+    lines.append("|--------|---------------|------|------|------|------|--------|--------|")
     for t in trials[:15]:
         nct = t.get("nct_id", "")
-        title = t.get("title", "")[:50]
+        title_en = t.get("title", "")[:45]
+        # 中文标题
+        tr = translations.get(nct, {})
+        title_cn = tr.get("title", "")
+        if title_cn:
+            title_display = f"{title_cn}<br/>{title_en}"
+        else:
+            title_display = title_en
         phase = t.get("phase", "")
         status_cn = _STATUS_CN.get(t.get("status", ""), t.get("status", ""))
         drugs = ", ".join(t.get("drugs", [])[:2])
         countries = ", ".join(t.get("countries", [])[:2])
-        lines.append(f"| [{nct}]({t.get('url', '')}) | {title} | {phase} | {status_cn} | {drugs} | {countries} |")
+        first_post = t.get("first_post_date", "")
+        last_update = t.get("last_update", "")
+        lines.append(
+            f"| [{nct}]({t.get('url', '')}) | {title_display} | {phase} | {status_cn} | {drugs} | {countries} | {first_post} | {last_update} |"
+        )
 
     if len(trials) > 15:
-        lines.append(f"| ... | *还有 {len(trials) - 15} 项* | | | | |")
+        lines.append(f"| ... | *还有 {len(trials) - 15} 项* | | | | | | |")
     lines.append("")
 
     # LLM 深度分析
@@ -328,10 +390,15 @@ def format_gene_section(gene: dict[str, Any], trials: list[dict[str, Any]], llm_
     return "\n".join(lines)
 
 
-def format_trial_list_all(all_trials: list[dict[str, Any]]) -> str:
-    """生成全部试验的合并清单。"""
+def format_trial_list_all(
+    all_trials: list[dict[str, Any]],
+    translations: dict[str, dict[str, str]] | None = None,
+) -> str:
+    """生成全部试验的合并清单。支持双语显示和日期字段。"""
     if not all_trials:
         return "本月无匹配试验。"
+
+    translations = translations or {}
 
     # 按 gene_name 分组
     by_gene: dict[str, list[dict[str, Any]]] = {}
@@ -343,17 +410,27 @@ def format_trial_list_all(all_trials: list[dict[str, Any]]) -> str:
     for gene_name, trials in by_gene.items():
         lines.append(f"#### {gene_name}（{len(trials)} 项）")
         lines.append("")
-        lines.append("| NCT ID | 标题 | 阶段 | 状态 | 国家 |")
-        lines.append("|--------|------|------|------|------|")
+        lines.append("| NCT ID | 标题（中/英） | 阶段 | 状态 | 国家 | 📅发布 | 📅更新 |")
+        lines.append("|--------|---------------|------|------|------|--------|--------|")
         for t in trials[:10]:
             nct = t.get("nct_id", "")
-            title = t.get("title", "")[:40]
+            title_en = t.get("title", "")[:35]
+            tr = translations.get(nct, {})
+            title_cn = tr.get("title", "")
+            if title_cn:
+                title_display = f"{title_cn}<br/>{title_en}"
+            else:
+                title_display = title_en
             phase = t.get("phase", "")
             status_cn = _STATUS_CN.get(t.get("status", ""), "")
             countries = ", ".join(t.get("countries", [])[:2])
-            lines.append(f"| [{nct}]({t.get('url', '')}) | {title} | {phase} | {status_cn} | {countries} |")
+            first_post = t.get("first_post_date", "")
+            last_update = t.get("last_update", "")
+            lines.append(
+                f"| [{nct}]({t.get('url', '')}) | {title_display} | {phase} | {status_cn} | {countries} | {first_post} | {last_update} |"
+            )
         if len(trials) > 10:
-            lines.append(f"| ... | *+{len(trials) - 10} 项* | | | |")
+            lines.append(f"| ... | *+{len(trials) - 10} 项* | | | | | |")
         lines.append("")
 
     return "\n".join(lines)
@@ -390,6 +467,7 @@ def format_glossary(genes: list[dict[str, Any]]) -> str:
 async def generate_report(
     gene_filter: str | None = None,
     use_llm: bool = True,
+    translate: bool = False,
 ) -> str:
     """生成月报主流程。"""
     config = load_config()
@@ -412,6 +490,7 @@ async def generate_report(
     print(f"   时间窗口: {start_date} ~ {end_date}")
     print(f"   基因数量: {len(genes)}")
     print(f"   LLM 分析: {'启用' if use_llm else '禁用'}")
+    print(f"   标题翻译: {'启用' if translate else '禁用（LLM分析已为中文）'}")
     print()
 
     # Step 1: 逐基因搜索
@@ -434,101 +513,220 @@ async def generate_report(
     stats_table = stats_to_table(overall_stats)
     print("   ✅ 完成\n")
 
-    # Step 3: LLM 深度分析
-    print("🤖 Step 3: LLM 深度分析 ...")
+    # Step 2.5: 双语翻译（可选，默认关闭——LLM深度分析已输出中文）
+    translations: dict[str, dict[str, str]] = {}
+    if translate:
+        print("🌐 Step 2.5: 双语翻译试验标题 ...")
+        translations = translate_fields(
+            items=all_trials,
+            fields=["title"],
+            key_field="nct_id",
+            domain="临床试验",
+            config=config,
+            use_llm=use_llm,
+        )
+        print(f"   ✅ 已翻译 {len(translations)}/{len(all_trials)} 项试验\n")
+    else:
+        print("🌐 Step 2.5: 标题翻译已跳过（LLM分析已为中文）\n")
+
+    # Step 3: LLM 深度分析（2并发）
+    print("🤖 Step 3: LLM 深度分析（2并发）...")
 
     # 准备数据摘要给 LLM
+    now_str = datetime.now().strftime("%Y年%m月%d日")
     data_summary = json.dumps({
+        "报告日期": now_str,
+        "时间窗口": f"{start_date} ~ {end_date}",
         "total_trials": len(all_trials),
         "gene_count": len(genes),
         "status_dist": overall_stats["status"],
-        "top_biomarkers": list(overall_stats["biomarker"].items())[:5],
-        "top_drugs": list(overall_stats["drug"].items())[:5],
-        "top_countries": list(overall_stats["country"].items())[:5],
+        "top_biomarkers": list(overall_stats["biomarker"].items())[:8],
+        "top_drugs": list(overall_stats["drug"].items())[:8],
+        "top_countries": list(overall_stats["country"].items())[:8],
+        "top_sponsors": list(overall_stats["sponsor"].items())[:5],
         "phase_dist": overall_stats["phase"],
     }, ensure_ascii=False, indent=2)
 
-    # 3.1 总体分析
-    print("   [1/9] 总体分析 ...", end=" ", flush=True)
-    llm_overview = llm_analyze(
-        f"基于以下胰腺癌临床试验数据，生成本月概览分析（300字内）：\n\n{data_summary}\n\n"
-        "重点：总体趋势、招募状态分布、阶段分布、与上月可能的对比方向。",
-        config, use_llm,
-    )
-    print("✅")
+    # 构建所有 LLM 任务（task_id, prompt）
+    llm_tasks: list[tuple[str, str, dict[str, Any], bool]] = []
 
-    # 3.2 逐基因分析
-    gene_sections: list[str] = []
+    # 3.1 总体分析
+    llm_tasks.append((
+        "overview",
+        f"【当前日期：{now_str}】基于以下胰腺癌临床试验数据，生成本月概览深度分析（500-800字）：\n\n{data_summary}\n\n"
+        "分析维度：\n"
+        "1. 总体趋势：本月试验数量、招募状态分布反映的研发热度\n"
+        "2. 靶点格局：哪些靶点最活跃、新兴靶点趋势\n"
+        "3. 药物管线：创新药 vs 仿制药/联合用药的比例\n"
+        "4. 地区分布：全球布局重心、中国参与度\n"
+        "5. 阶段分布：早期 vs 中后期的比例，反映管线成熟度\n"
+        "6. 与行业大趋势的对比（如KRAS从不可成药到靶向突破）\n"
+        "要求：数据驱动、有观点、给出病友可参考的判断。严禁编造日期。",
+        config, use_llm,
+    ))
+
+    # 3.2 逐基因分析 — 预构建 prompt
+    gene_prompts: dict[str, str] = {}
     for gene in genes:
         trials = gene_data.get(gene["id"], [])
         gene_stats = compute_stats(trials)
+        trial_details = []
+        for t in trials[:5]:
+            trial_details.append({
+                "nct_id": t.get("nct_id"),
+                "title": t.get("title", "")[:80],
+                "phase": t.get("phase"),
+                "status": t.get("status"),
+                "drugs": t.get("drugs", [])[:3],
+                "sponsor": t.get("sponsor"),
+                "countries": t.get("countries", [])[:2],
+                "start_date": t.get("start_date"),
+            })
         gene_summary = json.dumps({
-            "gene": gene["name"],
-            "trials": len(trials),
-            "top_drugs": list(gene_stats["drug"].items())[:3],
-            "top_biomarkers": list(gene_stats["biomarker"].items())[:3],
+            "基因": gene["name"],
+            "中文名": gene.get("cn_name", ""),
+            "试验数": len(trials),
+            "top_drugs": list(gene_stats["drug"].items())[:5],
+            "top_biomarkers": list(gene_stats["biomarker"].items())[:5],
             "status": gene_stats["status"],
-            "countries": list(gene_stats["country"].items())[:3],
-        }, ensure_ascii=False)
+            "countries": list(gene_stats["country"].items())[:5],
+            "sponsors": list(gene_stats["sponsor"].items())[:3],
+            "代表试验": trial_details,
+        }, ensure_ascii=False, indent=2)
 
-        print(f"   [基因] {gene['name']} 分析 ...", end=" ", flush=True)
-        llm_gene = llm_analyze(
-            f"分析 {gene['name']}（{gene.get('cn_name','')}）靶点的胰腺癌临床试验现状（300字内）：\n\n"
-            f"数据：{gene_summary}\n"
-            f"基因说明：{gene.get('cn_desc','')}\n\n"
-            "重点：本月新进展、关键药物、阶段分布、与同类靶点对比。",
-            config, use_llm,
+        prompt = (
+            f"【当前日期：{now_str}】深度分析 {gene['name']}（{gene.get('cn_name','')}）靶点的胰腺癌临床试验现状（500-800字）：\n\n"
+            f"基因说明：{gene.get('cn_desc','')}\n"
+            f"数据：\n{gene_summary}\n\n"
+            "分析维度：\n"
+            "1. 本月新进展：新启动试验、阶段跃迁、关键数据读出\n"
+            "2. 药物管线分析：各药物机制分类（小分子/ADC/细胞疗法等）、创新程度\n"
+            "3. 阶段分布解读：早期探索 vs 确证性试验的比例\n"
+            "4. 申办方格局：大药厂 vs Biotech、中国参与\n"
+            "5. 临床意义：对携带该靶点突变的胰腺癌患者意味着什么\n"
+            "6. 与同类靶点的差异化定位\n"
+            "要求：具体到药物名和试验编号，给出可操作的判断。严禁编造日期和数据。"
         )
-        print("✅")
-
-        gene_sections.append(format_gene_section(gene, trials, llm_gene))
+        gene_prompts[gene["id"]] = prompt
+        llm_tasks.append((f"gene_{gene['id']}", prompt, config, use_llm))
 
     # 3.3 技术赛道分析
     tracks = [
         ("ras", "RAS 抑制剂赛道",
-         "分析 RAS 抑制剂赛道进展（KRAS G12D/G12C/G12V 抑制剂、三复合物抑制剂、RMC-5127 等）"),
+         "深度分析 RAS 抑制剂赛道进展（500-800字）。覆盖：\n"
+         "- KRAS G12D/G12C/G12V 各亚型抑制剂进展（Zoldonrasib/VS-7375/GFH375/HRS-4642 等）\n"
+         "- 三复合物抑制剂（RMC-5127/daraxonrasib）vs 共价抑制剂\n"
+         "- RAS(ON)/RAS(OFF) 策略差异\n"
+         "- 联合用药趋势（+EGFR/+化疗/+SHP2）\n"
+         "- 中国国产管线进展"),
         ("adc", "ADC 药物赛道",
-         "分析 ADC 药物赛道进展（TROP2/TF/Nectin-4/CEACAM5/CDH17/CLDN18.2 ADC）"),
+         "深度分析 ADC 药物赛道进展（500-800字）。覆盖：\n"
+         "- 胰腺癌 ADC 靶点全景（TROP2/TF/Nectin-4/CEACAM5/CDH17/CLDN18.2/B7-H3）\n"
+         "- 各靶点的 ADC 管线和阶段\n"
+         "- linker/payload 技术迭代趋势\n"
+         "- 与化疗联用策略\n"
+         "- 中国 ADC 研发竞争力"),
         ("immune", "免疫治疗赛道",
-         "分析免疫治疗进展（CAR-T/TCR-T/mRNA疫苗/ICI 在胰腺癌的进展）"),
+         "深度分析免疫治疗进展（500-800字）。覆盖：\n"
+         "- CAR-T（MSLN/B7-H3 靶点）在胰腺癌的挑战与突破\n"
+         "- TCR-T 靶向 KRAS 突变的进展\n"
+         "- mRNA 个性化新抗原疫苗的中国进展\n"
+         "- ICI（PD-1/CTLA-4）在胰腺癌的困境与联合策略\n"
+         "- 肿瘤微环境屏障的克服策略"),
         ("ddr", "DDR 靶向赛道",
-         "分析 DDR 靶向赛道进展（PARP抑制剂、ATR抑制剂、ATM缺陷合成致死）"),
+         "深度分析 DDR 靶向赛道进展（500-800字）。覆盖：\n"
+         "- PARP 抑制剂（奥拉帕利）在 BRCA 突变胰腺癌的既得阵地\n"
+         "- ATR 抑制剂（Tuvusertib/Elimusertib/Ceralasertib）的合成致死策略\n"
+         "- ATM 缺失作为生物标志物的临床应用\n"
+         "- DDR + 免疫联合的机制基础\n"
+         "- HRD 检测的标准化进展"),
         ("protac", "PROTAC 降解剂赛道",
-         "分析 PROTAC 降解剂在胰腺癌的进展（ARV-806 等 KRAS PROTAC）"),
+         "深度分析 PROTAC 降解剂在胰腺癌的进展（500-800字）。覆盖：\n"
+         "- KRAS PROTAC（ARV-806 等）的设计原理\n"
+         "- PROTAC vs 小分子抑制剂的优势\n"
+         "- 临床转化挑战（口服生物利用度/脱靶）\n"
+         "- 全球管线竞争格局"),
         ("shp2", "SHP2 抑制剂赛道",
-         "分析 SHP2 抑制剂赛道进展（联合 KRAS 抑制剂策略）"),
+         "深度分析 SHP2 抑制剂赛道进展（500-800字）。覆盖：\n"
+         "- SHP2 在 RAS/MAPK 通路的角色\n"
+         "- 联合 KRAS 抑制剂的协同机制\n"
+         "- 临床管线（TNO155/RMC-4630 等）\n"
+         "- 单药 vs 联用的剂量优化策略"),
     ]
 
-    llm_tracks: dict[str, str] = {}
     for track_id, track_name, prompt_hint in tracks:
-        print(f"   [赛道] {track_name} ...", end=" ", flush=True)
-        llm_tracks[track_id] = llm_analyze(
-            f"{prompt_hint}（300字内）。基于本月试验数据：\n{data_summary}",
+        llm_tasks.append((
+            f"track_{track_id}",
+            f"【当前日期：{now_str}】{prompt_hint}\n\n"
+            f"本月试验数据参考：\n{data_summary}\n\n"
+            "要求：结合本月实际数据，给出有数据支撑的分析，不要泛泛而谈。严禁编造日期和药物名。",
             config, use_llm,
-        )
-        print("✅")
+        ))
 
     # 3.4 中国可及性 + 里程碑
-    print("   [中国可及性] ...", end=" ", flush=True)
     china_trials = [t for t in all_trials if "China" in t.get("countries", [])]
+    china_details = []
+    for t in china_trials[:5]:
+        china_details.append({
+            "nct_id": t.get("nct_id"),
+            "title": t.get("title", "")[:60],
+            "drugs": t.get("drugs", [])[:2],
+            "sponsor": t.get("sponsor"),
+        })
     china_summary = json.dumps({
-        "china_trials": len(china_trials),
-        "china_genes": list(Counter(t.get("_gene_name", "") for t in china_trials).most_common(5)),
-    }, ensure_ascii=False)
-    llm_china = llm_analyze(
-        f"分析胰腺癌临床试验的中国可及性（300字内）：\n{china_summary}\n"
-        "重点：中国开展试验统计、国产药物进展（HRS-4642/GFH375/ABO2102等）、医保前景。",
-        config, use_llm,
-    )
-    print("✅")
+        "中国试验数": len(china_trials),
+        "中国靶点分布": list(Counter(t.get("_gene_name", "") for t in china_trials).most_common(5)),
+        "中国试验详情": china_details,
+    }, ensure_ascii=False, indent=2)
 
-    print("   [里程碑] ...", end=" ", flush=True)
-    llm_milestones = llm_analyze(
-        f"列出本月胰腺癌临床试验的重要里程碑（300字内）：\n{data_summary}\n"
-        "重点：3期发布、FDA/NMPA批准、关键数据读出、新药首次人体试验。",
+    llm_tasks.append((
+        "china",
+        f"【当前日期：{now_str}】深度分析胰腺癌临床试验的中国可及性（500-800字）：\n{china_summary}\n\n"
+        "分析维度：\n"
+        "1. 中国开展试验数量和靶点分布\n"
+        "2. 国产创新药进展（HRS-4642/GFH375/ABO2102/IMP9064/TCC1727 等）\n"
+        "3. 中国患者入组可及性（地域/费用/医保）\n"
+        "4. NMPA 审评进度 vs FDA 的差距\n"
+        "5. 对中国病友的实际就医建议\n"
+        "严禁编造日期和审批信息。",
         config, use_llm,
-    )
-    print("✅\n")
+    ))
+
+    llm_tasks.append((
+        "milestones",
+        f"【当前日期：{now_str}】列出本月胰腺癌临床试验的重要里程碑（500-800字）：\n{data_summary}\n\n"
+        "重点关注：\n"
+        "1. 3期试验启动/数据读出/发布\n"
+        "2. FDA/NMPA/EMA 批准或受理\n"
+        "3. 关键 II 期数据公布\n"
+        "4. 新药首次人体试验（FIC）\n"
+        "5. 专利/授权/并购事件\n"
+        "6. 暂停/终止试验的原因分析\n"
+        "要求：如本月无重大里程碑，明确说明'本月无重大里程碑事件'，不要编造。结合数据中可观察到的线索分析。",
+        config, use_llm,
+    ))
+
+    # 并发执行所有 LLM 任务（2并发）
+    total_tasks = len(llm_tasks)
+    print(f"   共 {total_tasks} 个分析任务，{_LLM_CONCURRENCY} 并发执行 ...")
+    print("   ", end="", flush=True)
+    llm_results = llm_analyze_batch(llm_tasks)
+    print(f"   ✅ 全部完成（{len(llm_results)}/{total_tasks}）\n")
+
+    # 提取结果
+    llm_overview = llm_results.get("overview", "")
+    llm_tracks: dict[str, str] = {}
+    for track_id, _, _ in tracks:
+        llm_tracks[track_id] = llm_results.get(f"track_{track_id}", "")
+    llm_china = llm_results.get("china", "")
+    llm_milestones = llm_results.get("milestones", "")
+
+    # 组装基因专区
+    gene_sections: list[str] = []
+    for gene in genes:
+        trials = gene_data.get(gene["id"], [])
+        llm_gene = llm_results.get(f"gene_{gene['id']}", "")
+        gene_sections.append(format_gene_section(gene, trials, llm_gene, translations))
 
     # Step 4: 组装报告
     print("📝 Step 4: 组装最终报告 ...")
@@ -550,7 +748,7 @@ async def generate_report(
         llm_ddr=llm_tracks["ddr"],
         llm_protac=llm_tracks["protac"],
         llm_shp2=llm_tracks["shp2"],
-        trial_list_all=format_trial_list_all(all_trials),
+        trial_list_all=format_trial_list_all(all_trials, translations),
         llm_china=llm_china,
         llm_milestones=llm_milestones,
         glossary=format_glossary(genes),
@@ -593,11 +791,13 @@ async def main() -> None:
     parser.add_argument("--gene", "-g", default=None, help="仅生成指定基因的报告（基因ID）")
     parser.add_argument("--no-llm", action="store_true", help="跳过 LLM 分析，输出骨架")
     parser.add_argument("--no-cache", action="store_true", help="忽略缓存，重新搜索")
+    parser.add_argument("--translate", action="store_true", help="启用试验标题翻译（默认关闭，LLM分析已为中文）")
     args = parser.parse_args()
 
     await generate_report(
         gene_filter=args.gene,
         use_llm=not args.no_llm,
+        translate=args.translate,
     )
 
 

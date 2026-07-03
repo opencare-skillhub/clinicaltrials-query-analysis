@@ -34,8 +34,8 @@ except ImportError:
 _BASE_URL = "https://clinicaltrials.gov/api/v2/studies"
 _DEFAULT_PAGE_SIZE = 100
 _REQUEST_TIMEOUT = 30.0
-_MAX_RETRIES = 3
-_RETRY_DELAY = 1.0
+_MAX_RETRIES = 5
+_RETRY_DELAY = 1.5
 
 # 已知胰腺癌/肿瘤 Biomarker（用于从入排标准中提取）
 _BIOMARKER_PATTERNS: list[tuple[str, str]] = [
@@ -102,7 +102,13 @@ class ClinicalTrialsSearch:
     """ClinicalTrials.gov API v2 搜索客户端。"""
 
     def __init__(self, timeout: float = _REQUEST_TIMEOUT) -> None:
-        self._client = httpx.AsyncClient(timeout=timeout)
+        self._client = httpx.AsyncClient(
+            timeout=timeout,
+            headers={
+                "User-Agent": "OpenRare-ClinicalTrials-Search/1.0 (research; contact@example.com)",
+                "Accept": "application/json",
+            },
+        )
 
     async def aclose(self) -> None:
         await self._client.aclose()
@@ -200,6 +206,10 @@ class ClinicalTrialsSearch:
                 "EligibilityCriteria",
                 "LeadSponsorName",
                 "StartDate",
+                "PrimaryCompletionDate",
+                "CompletionDate",
+                "LastUpdatePostDate",
+                "StudyFirstPostDate",
                 "LocationCountry",
                 "LocationCity",
                 "LocationFacility",
@@ -254,6 +264,9 @@ class ClinicalTrialsSearch:
                 )
                 if exc.response.status_code == 429:
                     await asyncio.sleep(_RETRY_DELAY * attempt * 2)
+                elif exc.response.status_code == 403:
+                    # 403 通常是临时限流，退避重试
+                    await asyncio.sleep(_RETRY_DELAY * attempt * 3)
                 elif exc.response.status_code >= 500:
                     await asyncio.sleep(_RETRY_DELAY * attempt)
                 else:
@@ -324,6 +337,12 @@ class ClinicalTrialsSearch:
             start_date_struct = status_mod.get("startDateStruct", {})
             start_date = start_date_struct.get("date", "") if start_date_struct else ""
             last_update = status_mod.get("lastUpdatePostDateStruct", {}).get("date", "")
+            # 发布时间（首次公布）
+            first_post = status_mod.get("studyFirstPostDateStruct", {}).get("date", "")
+            # 主要完成日期
+            primary_completion = status_mod.get("primaryCompletionDateStruct", {}).get("date", "")
+            # 完成日期
+            completion_date = status_mod.get("completionDateStruct", {}).get("date", "")
 
             # 地点（国家列表）
             locations = contacts_mod.get("locations", [])
@@ -351,6 +370,9 @@ class ClinicalTrialsSearch:
                 "interventions": "; ".join(all_interventions),
                 "sponsor": sponsor,
                 "start_date": start_date,
+                "first_post_date": first_post,
+                "primary_completion_date": primary_completion,
+                "completion_date": completion_date,
                 "last_update": last_update,
                 "countries": countries,
                 "cities": cities[:5],  # 最多显示5个城市
@@ -413,6 +435,17 @@ def print_trials_table(trials: list[dict[str, Any]]) -> None:
         print(f"  {i}. [{t['nct_id']}] {t['title']}")
         print(f"     阶段: {t['phase']}  |  状态: {status_icon} {status_cn}")
 
+        # 日期信息：发布时间 + 启动 + 最近更新
+        dates_parts = []
+        if t.get("first_post_date"):
+            dates_parts.append(f"发布: {t['first_post_date']}")
+        if t.get("start_date"):
+            dates_parts.append(f"启动: {t['start_date']}")
+        if t.get("last_update"):
+            dates_parts.append(f"更新: {t['last_update']}")
+        if dates_parts:
+            print(f"     📅 {'  |  '.join(dates_parts)}")
+
         if t["drugs"]:
             drugs_str = ", ".join(t["drugs"][:6])
             if len(t["drugs"]) > 6:
@@ -430,9 +463,6 @@ def print_trials_table(trials: list[dict[str, Any]]) -> None:
             if len(t["countries"]) > 5:
                 country_str += f" ... (+{len(t['countries'])-5})"
             print(f"     国家: {country_str}")
-
-        if t["start_date"]:
-            print(f"     启动日期: {t['start_date']}")
 
         print(f"     🔗 {t['url']}")
         print()

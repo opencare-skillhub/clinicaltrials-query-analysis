@@ -46,6 +46,7 @@ _load_dotenv()
 from config_loader import load_config, get_all_genes, get_report_genes, get_genes_by_category
 from search import ClinicalTrialsSearch, print_trials_table, print_summary
 from report_nccn import generate_report
+from translator import translate_fields
 
 
 def print_header() -> None:
@@ -161,8 +162,26 @@ async def single_gene_search() -> None:
     finally:
         await client.aclose()
 
-    # 输出
+      # 输出
+    # 双语翻译
+    config = load_config()
+    translations = translate_fields(
+        items=all_trials,
+        fields=["title", "conditions"],
+        key_field="nct_id",
+        domain="临床试验",
+        config=config,
+    )
+    # 增强显示：在原始表格之后追加中文翻译摘要
     print_trials_table(all_trials)
+    if translations:
+        print(f"\n{'='*100}")
+        print(f"  🌐 中文翻译（{len(translations)} 项）")
+        print(f"{'='*100}\n")
+        for t in all_trials:
+            tr = translations.get(t.get("nct_id", ""), {})
+            if tr.get("title"):
+                print(f"  [{t['nct_id']}] {tr['title']}")
     print_summary(all_trials, gene["name"])
 
     input("\n按回车返回主菜单...")
@@ -207,6 +226,8 @@ async def multi_gene_analysis() -> None:
         await client.aclose()
 
     # 对比分析
+    config = load_config()
+
     print(f"\n{'='*80}")
     print(f"  📊 多基因专题分析报告")
     print(f"{'='*80}\n")
@@ -225,9 +246,23 @@ async def multi_gene_analysis() -> None:
 
     print()
 
-    # 逐基因详情
+    # 逐基因详情 + 双语翻译
     for gene_name, trials in results.items():
+        translations = translate_fields(
+            items=trials,
+            fields=["title", "conditions"],
+            key_field="nct_id",
+            domain="临床试验",
+            config=config,
+        )
         print_trials_table(trials)
+        if translations:
+            print(f"  🌐 中文翻译（{len(translations)} 项）")
+            for t in trials:
+                tr = translations.get(t.get("nct_id", ""), {})
+                if tr.get("title"):
+                    print(f"    [{t['nct_id']}] {tr['title']}")
+            print()
         print_summary(trials, gene_name)
 
     input("\n按回车返回主菜单...")
@@ -243,10 +278,13 @@ async def nccn_report() -> None:
     use_llm_input = input("是否启用 LLM 深度分析？(y/n, 默认y): ").strip().lower()
     use_llm = use_llm_input != "n"
 
+    translate_input = input("是否启用试验标题翻译？(y/n, 默认n): ").strip().lower()
+    translate = translate_input == "y"
+
     gene_filter = input("仅生成指定基因？(回车=全部月报基因, 或输入基因ID如 kras): ").strip() or None
 
     print()
-    await generate_report(gene_filter=gene_filter, use_llm=use_llm)
+    await generate_report(gene_filter=gene_filter, use_llm=use_llm, translate=translate)
 
     input("\n按回车返回主菜单...")
 

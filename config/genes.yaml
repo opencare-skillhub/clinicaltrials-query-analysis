@@ -34,12 +34,31 @@ report_defaults:
 report_window: 30d    # 过去30天滚动窗口
 
 # 月报 LLM 配置（用于深度分析段落生成）
+# provider 选项: custom(默认) | stepfun | dashscope
+#   custom    = 从 .env 读取 LLM_API_KEY/LLM_BASE_URL/LLM_MODEL
+#   stepfun   = 从 .env 读取 STEP_API_KEY/STEP_BASE_URL/STEP_MODEL
+#   dashscope = 从 .env 读取 DASHSCOPE_API_KEY + 通义千问固定配置
 llm:
-  api_key_env: LLM_API_KEY              # 从环境变量读取 API Key
-  base_url_env: LLM_BASE_URL            # 从环境变量读取 Base URL
-  model_env: LLM_MODEL                  # 从环境变量读取模型名
-  model_default: glm-4-flash            # 默认模型
-  temperature: 0.4
+  provider: stepfun                     # 当前使用的 provider (stepfun上下文100万)
+  temperature: 0.4                     # 生成温度
+  max_tokens: 20000                    # 单次最大输出 token (stepfun支持长输出)
+  providers:
+    custom:
+      api_key_env: LLM_API_KEY
+      base_url_env: LLM_BASE_URL
+      model_env: LLM_MODEL
+      model_default: glm-4-flash
+    stepfun:
+      api_key_env: STEP_API_KEY
+      base_url_env: STEP_BASE_URL
+      model_env: STEP_MODEL
+      model_default: step-3.7-flash
+    dashscope:
+      api_key_env: DASHSCOPE_API_KEY
+      base_url_env: DASHSCOPE_URL           # 从 .env 读取，回退到默认值
+      base_url_default: https://dashscope.aliyuncs.com/compatible-mode/v1
+      model_env: DASHSCOPE_MODEL
+      model_default: qwen-turbo
 
 # ============================================================
 # 基因定义

@@ -69,25 +69,55 @@ def get_genes_by_category(category: str, config: dict | None = None) -> list[dic
     return [g for g in config.get("genes", []) if g.get("category") == category]
 
 
-def get_llm_config(config: dict | None = None) -> dict[str, str]:
+def get_llm_config(config: dict | None = None) -> dict[str, Any]:
     """
-    获取 LLM 配置，从环境变量解析实际值。
+    获取 LLM 配置，根据 provider 从环境变量解析实际值。
+
+    支持三种 provider: custom / stepfun / dashscope
 
     Returns
     -------
-    dict with keys: api_key, base_url, model, temperature
+    dict with keys: provider, api_key, base_url, model, temperature, max_tokens
     """
     if config is None:
         config = load_config()
     llm_cfg = config.get("llm", {})
+    provider = llm_cfg.get("provider", "custom")
+    providers = llm_cfg.get("providers", {})
+
+    # 如果 provider 配置不存在，回退到旧的扁平配置
+    if provider not in providers:
+        return {
+            "provider": "custom",
+            "api_key": os.environ.get(llm_cfg.get("api_key_env", "LLM_API_KEY"), ""),
+            "base_url": os.environ.get(llm_cfg.get("base_url_env", "LLM_BASE_URL"), ""),
+            "model": os.environ.get(
+                llm_cfg.get("model_env", "LLM_MODEL"),
+                llm_cfg.get("model_default", "glm-4-flash"),
+            ),
+            "temperature": llm_cfg.get("temperature", 0.4),
+            "max_tokens": llm_cfg.get("max_tokens", 2000),
+        }
+
+    prov_cfg = providers[provider]
+    # base_url 优先级: base_url_env(环境变量) > base_url_default(配置默认值) > base_url(固定值)
+    base_url_env = prov_cfg.get("base_url_env", "")
+    base_url = os.environ.get(base_url_env, "") if base_url_env else ""
+    if not base_url:
+        base_url = prov_cfg.get("base_url_default", "") or prov_cfg.get("base_url", "")
+    # model: 环境变量 > 默认值
+    model = os.environ.get(
+        prov_cfg.get("model_env", ""),
+        prov_cfg.get("model_default", ""),
+    )
+
     return {
-        "api_key": os.environ.get(llm_cfg.get("api_key_env", "LLM_API_KEY"), ""),
-        "base_url": os.environ.get(llm_cfg.get("base_url_env", "LLM_BASE_URL"), ""),
-        "model": os.environ.get(
-            llm_cfg.get("model_env", "LLM_MODEL"),
-            llm_cfg.get("model_default", "glm-4-flash"),
-        ),
+        "provider": provider,
+        "api_key": os.environ.get(prov_cfg.get("api_key_env", ""), ""),
+        "base_url": base_url,
+        "model": model,
         "temperature": llm_cfg.get("temperature", 0.4),
+        "max_tokens": llm_cfg.get("max_tokens", 2000),
     }
 
 
