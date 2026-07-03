@@ -237,8 +237,11 @@ class ClinicalTrialsSearch:
         query_parts.append(keyword)
 
         # 疾病/癌种筛选 — 使用 AREA[Condition] 字段限定
-        # 默认胰腺癌（本技能为胰腺癌临床情报工具）
-        disease_filter = disease if disease else "pancreatic"
+        # 默认同时匹配胰腺癌 + 实体瘤（很多靶向药试验condition写solid tumor）
+        if disease:
+            disease_filter = disease
+        else:
+            disease_filter = "(pancreatic OR \"solid tumor\")"
         query_parts.append(f"AREA[Condition]{disease_filter}")
 
         # 时间范围 — 使用 AREA[StartDate]RANGE 语法
