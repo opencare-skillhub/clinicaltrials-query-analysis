@@ -33,6 +33,84 @@ report_defaults:
 # 月报时间窗口
 report_window: 30d    # 过去30天滚动窗口
 
+# 技术赛道补充检索。用于覆盖不限于单一基因的实体瘤新机制/新药物。
+# 这些词仍会叠加默认疾病条件：(pancreatic OR "solid tumor")。
+report_track_searches:
+  - id: ras
+    name: RAS 抑制剂赛道
+    search_terms:
+      - "KRAS inhibitor"
+      - "KRAS G12D inhibitor"
+      - "KRAS G12V inhibitor"
+      - "KRAS G12C inhibitor"
+      - "RAS(ON) inhibitor"
+      - "zoldonrasib"
+      - "daraxonrasib"
+      - "RMC-6236"
+      - "RMC-9805"
+      - "VS-7375"
+      - "HRS-4642"
+      - "GFH375"
+  - id: adc
+    name: ADC 药物赛道
+    search_terms:
+      - "antibody drug conjugate pancreatic"
+      - "ADC solid tumor pancreatic"
+      - "TROP2 ADC"
+      - "Tissue Factor ADC"
+      - "Nectin-4 ADC"
+      - "B7-H3 ADC"
+      - "CLDN18.2 ADC"
+      - "CEACAM5 ADC"
+      - "CDH17 ADC"
+  - id: immune
+    name: 免疫治疗赛道
+    search_terms:
+      - "pancreatic cancer immunotherapy"
+      - "KRAS vaccine"
+      - "KRAS TCR"
+      - "TCR-T KRAS"
+      - "CAR-T pancreatic"
+      - "MSLN CAR-T"
+      - "B7-H3 CAR-T"
+      - "neoantigen vaccine pancreatic"
+      - "mRNA vaccine pancreatic"
+  - id: ddr
+    name: DDR 靶向赛道
+    search_terms:
+      - "PARP inhibitor pancreatic"
+      - "ATR inhibitor pancreatic"
+      - "ATM deficient solid tumor"
+      - "BRCA mutation pancreatic"
+      - "HRD pancreatic"
+      - "DNA damage response pancreatic"
+      - "tuvusertib"
+      - "elimusertib"
+      - "ceralasertib"
+  - id: protac
+    name: PROTAC 降解剂赛道
+    search_terms:
+      - "ASP3082"
+      - "ASP-3082"
+      - "KRAS degrader"
+      - "KRAS G12D degrader"
+      - "PROTAC KRAS"
+      - "PROTAC pancreatic"
+      - "targeted protein degrader"
+      - "protein degrader solid tumor"
+      - "molecular glue solid tumor"
+      - "ARV-806"
+  - id: shp2
+    name: SHP2 抑制剂赛道
+    search_terms:
+      - "SHP2 inhibitor"
+      - "PTPN11 inhibitor"
+      - "SHP2 KRAS"
+      - "TNO155"
+      - "RMC-4630"
+      - "PF-07284892"
+      - "JAB-3312"
+
 # 月报 LLM 配置（用于深度分析段落生成）
 # provider: 当前主 provider
 # fallback: provider fallback 顺序（按优先级），主 provider 失败时自动切换
@@ -41,16 +119,18 @@ report_window: 30d    # 过去30天滚动窗口
 #   stepfun   = 从 .env 读取 STEP_API_KEY/STEP_BASE_URL/STEP_MODEL
 #   dashscope = 从 .env 读取 DASHSCOPE_API_KEY/DASHSCOPE_URL/DASHSCOPE_MODEL
 llm:
-  provider: custom                      # 当前使用的 provider
-  fallback: ["custom", "stepfun", "dashscope"]  # fallback 优先级顺序
+  provider: custom                      # 主 provider (SiliconFlow LongCat 速度较快)
+  fallback: ["custom", "dashscope"]     # fallback 顺序（stepfun 测速空响应，暂不默认启用）
   temperature: 0.4                     # 生成温度
-  max_tokens: 20000                    # 单次最大输出 token
+  max_tokens: 4000                     # 单次最大输出 token
+  concurrency: 4                       # LLM 分析并发数（1-8）
+  timeout: 60                          # 单次 provider 超时秒数（15-180）
   providers:
     custom:
       api_key_env: LLM_API_KEY
       base_url_env: LLM_BASE_URL
       model_env: LLM_MODEL
-      model_default: glm-4-flash
+      model_default: meituan-longcat/LongCat-2.0
     stepfun:
       api_key_env: STEP_API_KEY
       base_url_env: STEP_BASE_URL
@@ -62,6 +142,7 @@ llm:
       base_url_default: https://dashscope.aliyuncs.com/compatible-mode/v1
       model_env: DASHSCOPE_MODEL
       model_default: qwen-turbo
+
 
 # ============================================================
 # 基因定义

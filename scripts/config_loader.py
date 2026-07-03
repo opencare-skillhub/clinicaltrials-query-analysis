@@ -55,6 +55,13 @@ def get_report_genes(config: dict | None = None) -> list[dict[str, Any]]:
     return [g for g in config.get("genes", []) if g.get("report", False)]
 
 
+def get_report_track_searches(config: dict | None = None) -> list[dict[str, Any]]:
+    """获取月报技术赛道补充检索词。"""
+    if config is None:
+        config = load_config()
+    return config.get("report_track_searches", [])
+
+
 def get_all_genes(config: dict | None = None) -> list[dict[str, Any]]:
     """获取全部基因定义。"""
     if config is None:

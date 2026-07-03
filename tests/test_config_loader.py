@@ -22,6 +22,7 @@ from config_loader import (
     get_gene_by_id,
     get_all_genes,
     get_report_genes,
+    get_report_track_searches,
     get_genes_by_category,
     get_llm_config,
 )
@@ -59,6 +60,19 @@ def test_get_report_genes():
     for g in report_genes:
         assert g.get("report") is True, f"基因 {g['name']} 的 report 应为 True"
     print(f"✅ test_get_report_genes 通过 ({len(report_genes)} 个基因)")
+
+
+def test_get_report_track_searches():
+    """月报技术赛道补充检索配置。"""
+    config = load_config()
+    tracks = get_report_track_searches(config)
+    track_ids = {track["id"] for track in tracks}
+    assert "protac" in track_ids, "应包含 PROTAC 赛道补充检索"
+    protac = next(track for track in tracks if track["id"] == "protac")
+    assert "ASP3082" in protac.get("search_terms", []), "PROTAC 应覆盖 ASP3082"
+    assert any("solid tumor" in term for term in protac.get("search_terms", [])), \
+        "PROTAC 应包含实体瘤宽泛词"
+    print(f"✅ test_get_report_track_searches 通过 ({len(tracks)} 个赛道)")
 
 
 def test_get_all_genes():
@@ -114,6 +128,7 @@ def run_all():
         test_load_config,
         test_get_gene_by_id,
         test_get_report_genes,
+        test_get_report_track_searches,
         test_get_all_genes,
         test_get_genes_by_category,
         test_get_llm_config,

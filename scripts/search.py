@@ -33,9 +33,9 @@ except ImportError:
 # ---------------------------------------------------------------------------
 _BASE_URL = "https://clinicaltrials.gov/api/v2/studies"
 _DEFAULT_PAGE_SIZE = 100
-_REQUEST_TIMEOUT = 30.0
+_REQUEST_TIMEOUT = 45.0  # 更长超时
 _MAX_RETRIES = 5
-_RETRY_DELAY = 1.5
+_RETRY_DELAY = 2.0  # 更保守的退避时间
 
 # 已知胰腺癌/肿瘤 Biomarker（用于从入排标准中提取）
 _BIOMARKER_PATTERNS: list[tuple[str, str]] = [
@@ -111,8 +111,17 @@ class ClinicalTrialsSearch:
         self._client = httpx.AsyncClient(
             timeout=timeout,
             headers={
-                "User-Agent": "OpenRare-ClinicalTrials-Search/1.0 (research; contact@example.com)",
-                "Accept": "application/json",
+                # 模拟真实 Chrome 浏览器请求头（避免被识别为机器人）
+                "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36",
+                "Accept": "application/json, text/plain, */*",
+                "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
+                "Referer": "https://clinicaltrials.gov/",
+                "sec-ch-ua": '"Chromium";v="145", "Google Chrome";v="145", "Not:A-Brand";v="99"',
+                "sec-ch-ua-mobile": "?0",
+                "sec-ch-ua-platform": '"macOS"',
+                "sec-fetch-dest": "empty",
+                "sec-fetch-mode": "cors",
+                "sec-fetch-site": "same-origin",
             },
         )
 

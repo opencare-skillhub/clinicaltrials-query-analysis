@@ -19,6 +19,9 @@ from report_nccn import (
     format_gene_section,
     format_trial_list_all,
     format_glossary,
+    get_llm_runtime_config,
+    genes_with_trials_for_llm,
+    add_unique_trials,
 )
 
 
@@ -181,7 +184,64 @@ def test_format_glossary():
     assert "ADC" in glossary  # 通用术语
     assert "PROTAC" in glossary
     assert "PARP" in glossary
+    assert "\n\n| ADC |" not in glossary
+    assert "| ADC | 抗体偶联药物 |" in glossary
     print("✅ test_format_glossary 通过")
+
+
+def test_markdown_table_cell_escapes_pipe():
+    """表格单元格中的竖线会被转义。"""
+    genes = [{
+        "id": "test",
+        "name": "A|B",
+        "cn_name": "名称",
+        "cn_desc": "说明含 A|B",
+    }]
+    glossary = format_glossary(genes)
+    assert r"A\|B" in glossary
+    assert r"说明含 A\|B" in glossary
+    print("✅ test_markdown_table_cell_escapes_pipe 通过")
+
+
+def test_get_llm_runtime_config_bounds():
+    """LLM 运行参数会被限制到安全范围。"""
+    config = {"llm": {"concurrency": 99, "timeout": 999}}
+    runtime = get_llm_runtime_config(config)
+    assert runtime["concurrency"] == 8
+    assert runtime["timeout"] == 180
+
+    config = {"llm": {"concurrency": 0, "timeout": 1}}
+    runtime = get_llm_runtime_config(config)
+    assert runtime["concurrency"] == 1
+    assert runtime["timeout"] == 15
+    print("✅ test_get_llm_runtime_config_bounds 通过")
+
+
+def test_genes_with_trials_for_llm_skips_empty():
+    """只有存在试验数据的基因才进入 LLM 分析。"""
+    genes = [
+        {"id": "kras", "name": "KRAS"},
+        {"id": "brca1", "name": "BRCA1"},
+        {"id": "erbb2", "name": "HER2"},
+    ]
+    gene_data = {"kras": MOCK_TRIALS[:1], "brca1": [], "erbb2": MOCK_TRIALS[1:]}
+    included, skipped = genes_with_trials_for_llm(genes, gene_data)
+    assert [gene["id"] for gene in included] == ["kras", "erbb2"]
+    assert skipped == ["brca1"]
+    print("✅ test_genes_with_trials_for_llm_skips_empty 通过")
+
+
+def test_add_unique_trials_deduplicates_nct():
+    """补充赛道试验按 NCT ID 去重合并。"""
+    target = [{"nct_id": "NCT00001", "title": "old"}]
+    incoming = [
+        {"nct_id": "NCT00001", "title": "duplicate"},
+        {"nct_id": "NCT00003", "title": "new"},
+    ]
+    added = add_unique_trials(target, incoming)
+    assert added == 1
+    assert [trial["nct_id"] for trial in target] == ["NCT00001", "NCT00003"]
+    print("✅ test_add_unique_trials_deduplicates_nct 通过")
 
 
 def run_all():
@@ -198,6 +258,10 @@ def run_all():
         test_format_trial_list_all_empty,
         test_format_trial_list_all_with_dates,
         test_format_glossary,
+        test_markdown_table_cell_escapes_pipe,
+        test_get_llm_runtime_config_bounds,
+        test_genes_with_trials_for_llm_skips_empty,
+        test_add_unique_trials_deduplicates_nct,
     ]
     passed = 0
     failed = 0

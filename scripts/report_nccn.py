@@ -61,7 +61,14 @@ def _load_dotenv() -> None:
 
 _load_dotenv()
 
-from config_loader import load_config, get_report_genes, get_llm_config, get_gene_by_id, get_llm_fallback_providers
+from config_loader import (
+    load_config,
+    get_report_genes,
+    get_report_track_searches,
+    get_llm_config,
+    get_gene_by_id,
+    get_llm_fallback_providers,
+)
 from search import ClinicalTrialsSearch
 from translator import translate_fields
 
@@ -110,12 +117,13 @@ def llm_analyze(prompt: str, config: dict[str, Any], use_llm: bool = True) -> st
         return "> ⚠️ openai 库未安装，请运行 pip install openai"
 
     errors = []
+    runtime_cfg = get_llm_runtime_config(config)
     for idx, prov_cfg in enumerate(fallback_providers):
         try:
             client = OpenAI(
                 api_key=prov_cfg["api_key"],
                 base_url=prov_cfg["base_url"] or None,
-                timeout=120,
+                timeout=runtime_cfg["timeout"],
             )
             resp = client.chat.completions.create(
                 model=prov_cfg["model"],
@@ -137,7 +145,9 @@ def llm_analyze(prompt: str, config: dict[str, Any], use_llm: bool = True) -> st
                 temperature=prov_cfg.get("temperature", 0.4),
                 max_tokens=prov_cfg.get("max_tokens", 2000),
             )
-            result = resp.choices[0].message.content.strip()
+            result = (resp.choices[0].message.content or "").strip()
+            if not result:
+                raise ValueError("empty LLM response")
             # 如果用了后续 provider，打印提示
             if idx > 0:
                 print(f"(fb{idx}:{prov_cfg['provider']})", end=" ", flush=True)
@@ -152,12 +162,29 @@ def llm_analyze(prompt: str, config: dict[str, Any], use_llm: bool = True) -> st
     return f"> ⚠️ LLM 全部 {len(fallback_providers)} 个 provider 调用失败: {'; '.join(errors)}"
 
 
-# LLM 分析并发数（2并发，兼顾速度与API限流）
+# LLM 分析默认运行参数（可在 config/genes.yaml 的 llm 配置覆盖）
 _LLM_CONCURRENCY = 2
+_LLM_TIMEOUT = 120
+
+
+def get_llm_runtime_config(config: dict[str, Any]) -> dict[str, int]:
+    """获取 LLM 并发和超时参数，限制范围避免误配置导致接口雪崩。"""
+    llm_cfg = config.get("llm", {})
+
+    def _int_value(key: str, default: int) -> int:
+        try:
+            return int(llm_cfg.get(key, default))
+        except (TypeError, ValueError):
+            return default
+
+    concurrency = max(1, min(_int_value("concurrency", _LLM_CONCURRENCY), 8))
+    timeout = max(15, min(_int_value("timeout", _LLM_TIMEOUT), 180))
+    return {"concurrency": concurrency, "timeout": timeout}
 
 
 def llm_analyze_batch(
     tasks: list[tuple[str, str, dict[str, Any], bool]],
+    concurrency: int | None = None,
 ) -> dict[str, str]:
     """
     并发执行多个 LLM 分析任务。
@@ -172,7 +199,8 @@ def llm_analyze_batch(
         {task_id: llm_result}
     """
     results: dict[str, str] = {}
-    with ThreadPoolExecutor(max_workers=_LLM_CONCURRENCY) as executor:
+    max_workers = concurrency or _LLM_CONCURRENCY
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
         future_map = {
             executor.submit(llm_analyze, prompt, cfg, use_llm): task_id
             for task_id, prompt, cfg, use_llm in tasks
@@ -189,6 +217,37 @@ def llm_analyze_batch(
     return results
 
 
+def genes_with_trials_for_llm(
+    genes: list[dict[str, Any]],
+    gene_data: dict[str, list[dict[str, Any]]],
+) -> tuple[list[dict[str, Any]], list[str]]:
+    """拆分需要 LLM 分析的基因和无试验数据的跳过列表。"""
+    included: list[dict[str, Any]] = []
+    skipped: list[str] = []
+    for gene in genes:
+        if gene_data.get(gene["id"], []):
+            included.append(gene)
+        else:
+            skipped.append(gene["id"])
+    return included, skipped
+
+
+def add_unique_trials(
+    target: list[dict[str, Any]],
+    incoming: list[dict[str, Any]],
+) -> int:
+    """按 NCT ID 合并试验，返回实际新增数量。"""
+    seen = {trial.get("nct_id", "") for trial in target if trial.get("nct_id")}
+    added = 0
+    for trial in incoming:
+        nct = trial.get("nct_id", "")
+        if nct and nct not in seen:
+            target.append(trial)
+            seen.add(nct)
+            added += 1
+    return added
+
+
 # ---------------------------------------------------------------------------
 # 数据获取与缓存
 # ---------------------------------------------------------------------------
@@ -198,14 +257,19 @@ async def fetch_gene_trials(
     end_date: str,
     max_results: int = 50,
     use_cache: bool = True,
+    cache_namespace: str = "gene",
 ) -> list[dict[str, Any]]:
     """搜索单个基因的临床试验，支持缓存。"""
     month_tag = datetime.now().strftime("%Y-%m")
-    cache_file = _CACHE_DIR / f"{gene['id']}_{month_tag}.json"
+    cache_file = _CACHE_DIR / f"{cache_namespace}_{gene['id']}_{month_tag}.json"
+    legacy_cache_file = _CACHE_DIR / f"{gene['id']}_{month_tag}.json"
 
     # 检查缓存
     if use_cache and cache_file.exists():
         with open(cache_file, encoding="utf-8") as f:
+            return json.load(f)
+    if cache_namespace == "gene" and use_cache and legacy_cache_file.exists():
+        with open(legacy_cache_file, encoding="utf-8") as f:
             return json.load(f)
 
     # 逐个 search_term 搜索并合并去重
@@ -336,6 +400,24 @@ def stats_to_table(stats: dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
+def summarize_trials_for_prompt(trials: list[dict[str, Any]], limit: int = 8) -> list[dict[str, Any]]:
+    """压缩试验字段，作为 LLM prompt 的可追溯数据线索。"""
+    summary = []
+    for t in trials[:limit]:
+        summary.append({
+            "nct_id": t.get("nct_id"),
+            "title": t.get("title", "")[:90],
+            "phase": t.get("phase"),
+            "status": t.get("status"),
+            "drugs": t.get("drugs", [])[:4],
+            "biomarker": t.get("biomarker", ""),
+            "sponsor": t.get("sponsor"),
+            "countries": t.get("countries", [])[:3],
+            "start_date": t.get("start_date"),
+        })
+    return summary
+
+
 # ---------------------------------------------------------------------------
 # 基因专区生成
 # ---------------------------------------------------------------------------
@@ -454,6 +536,16 @@ def format_trial_list_all(
     return "\n".join(lines)
 
 
+def _md_table_cell(value: Any) -> str:
+    """转义 Markdown 表格单元格，避免竖线打断表格。"""
+    text = str(value or "")
+    return text.replace("|", r"\|").replace("\n", "<br/>")
+
+
+def _md_table_row(values: list[Any]) -> str:
+    return "| " + " | ".join(_md_table_cell(v) for v in values) + " |"
+
+
 def format_glossary(genes: list[dict[str, Any]]) -> str:
     """生成医学术语速查表。"""
     lines = ["| 缩写 | 全称 | 作用 |", "|------|------|------|"]
@@ -461,21 +553,21 @@ def format_glossary(genes: list[dict[str, Any]]) -> str:
         name = g["name"]
         cn_name = g.get("cn_name", "")
         cn_desc = g.get("cn_desc", "")
-        lines.append(f"| {name} | {cn_name} | {cn_desc} |")
-    lines.append("")
+        lines.append(_md_table_row([name, cn_name, cn_desc]))
     # 通用术语
-    lines.extend([
-        "| ADC | 抗体偶联药物 | 抗体+毒素的精准制导导弹 |",
-        "| PARP | 多聚ADP核糖聚合酶 | DDR靶向，合成致死策略 |",
-        "| ATR | ATM和Rad3相关激酶 | DDR靶向，合成致死策略 |",
-        "| PROTAC | 蛋白水解靶向嵌合体 | 降解靶蛋白的分子胶 |",
-        "| SHP2 | 含SH2结构域蛋白酪氨酸磷酸酶 | RAS/MAPK通路 |",
-        "| CAR-T | 嵌合抗原受体T细胞 | 基因工程免疫细胞疗法 |",
-        "| TCR-T | T细胞受体工程T细胞 | 靶向特定突变蛋白 |",
-        "| DDR | DNA损伤反应 | 细胞修复DNA的系统 |",
-        "| HRD | 同源重组缺陷 | PARP抑制剂敏感标志 |",
-        "| ICI | 免疫检查点抑制剂 | PD-1/PD-L1/CTLA-4抗体 |",
-    ])
+    common_terms = [
+        ["ADC", "抗体偶联药物", "抗体+毒素的精准制导导弹"],
+        ["PARP", "多聚ADP核糖聚合酶", "DDR靶向，合成致死策略"],
+        ["ATR", "ATM和Rad3相关激酶", "DDR靶向，合成致死策略"],
+        ["PROTAC", "蛋白水解靶向嵌合体", "降解靶蛋白的分子胶"],
+        ["SHP2", "含SH2结构域蛋白酪氨酸磷酸酶", "RAS/MAPK通路"],
+        ["CAR-T", "嵌合抗原受体T细胞", "基因工程免疫细胞疗法"],
+        ["TCR-T", "T细胞受体工程T细胞", "靶向特定突变蛋白"],
+        ["DDR", "DNA损伤反应", "细胞修复DNA的系统"],
+        ["HRD", "同源重组缺陷", "PARP抑制剂敏感标志"],
+        ["ICI", "免疫检查点抑制剂", "PD-1/PD-L1/CTLA-4抗体"],
+    ]
+    lines.extend(_md_table_row(term) for term in common_terms)
     return "\n".join(lines)
 
 
@@ -486,9 +578,14 @@ async def generate_report(
     gene_filter: str | None = None,
     use_llm: bool = True,
     translate: bool = False,
+    use_cache: bool = True,
+    llm_concurrency: int | None = None,
 ) -> str:
     """生成月报主流程。"""
     config = load_config()
+    runtime_cfg = get_llm_runtime_config(config)
+    if llm_concurrency is not None:
+        runtime_cfg["concurrency"] = max(1, min(llm_concurrency, 8))
 
     # 确定基因列表
     if gene_filter:
@@ -498,6 +595,7 @@ async def generate_report(
         genes = [gene]
     else:
         genes = get_report_genes(config)
+    track_searches = [] if gene_filter else get_report_track_searches(config)
 
     # 时间窗口（过去30天）
     end_date = datetime.now().strftime("%Y-%m-%d")
@@ -508,20 +606,54 @@ async def generate_report(
     print(f"   时间窗口: {start_date} ~ {end_date}")
     print(f"   基因数量: {len(genes)}")
     print(f"   LLM 分析: {'启用' if use_llm else '禁用'}")
+    if use_llm:
+        print(f"   LLM 并发/超时: {runtime_cfg['concurrency']} / {runtime_cfg['timeout']}s")
     print(f"   标题翻译: {'启用' if translate else '禁用（LLM分析已为中文）'}")
+    print(f"   搜索缓存: {'启用' if use_cache else '禁用'}")
     print()
 
     # Step 1: 逐基因搜索
     print("🔍 Step 1: 逐基因搜索 ClinicalTrials.gov ...")
     gene_data: dict[str, list[dict[str, Any]]] = {}
+    track_data: dict[str, list[dict[str, Any]]] = {}
     all_trials: list[dict[str, Any]] = []
 
     for i, gene in enumerate(genes, 1):
         print(f"   [{i}/{len(genes)}] {gene['name']} ...", end=" ", flush=True)
-        trials = await fetch_gene_trials(gene, start_date, end_date, max_results=50)
+        trials = await fetch_gene_trials(
+            gene,
+            start_date,
+            end_date,
+            max_results=50,
+            use_cache=use_cache,
+        )
         gene_data[gene["id"]] = trials
         all_trials.extend(trials)
         print(f"{len(trials)} 项")
+        # 避免触发 API 速率限制：每个基因搜索间隔 1-2 秒
+        if i < len(genes):
+            delay = 1.0 if use_cache else 2.0  # 无缓存时稍长间隔
+            await asyncio.sleep(delay)
+
+    if track_searches:
+        print("\n🔬 Step 1.5: 技术赛道补充搜索 ...")
+        for i, track in enumerate(track_searches, 1):
+            print(f"   [{i}/{len(track_searches)}] {track['name']} ...", end=" ", flush=True)
+            trials = await fetch_gene_trials(
+                track,
+                start_date,
+                end_date,
+                max_results=50,
+                use_cache=use_cache,
+                cache_namespace="track",
+            )
+            track_data[track["id"]] = trials
+            added = add_unique_trials(all_trials, trials)
+            print(f"{len(trials)} 项（新增 {added} 项）")
+            # 避免触发 API 速率限制：每个赛道搜索间隔 1-2 秒
+            if i < len(track_searches):
+                delay = 1.0 if use_cache else 2.0  # 无缓存时稍长间隔
+                await asyncio.sleep(delay)
 
     print(f"\n   ✅ 共检索到 {len(all_trials)} 项试验\n")
 
@@ -547,8 +679,8 @@ async def generate_report(
     else:
         print("🌐 Step 2.5: 标题翻译已跳过（LLM分析已为中文）\n")
 
-    # Step 3: LLM 深度分析（2并发）
-    print("🤖 Step 3: LLM 深度分析（2并发）...")
+    # Step 3: LLM 深度分析
+    print(f"🤖 Step 3: LLM 深度分析（{runtime_cfg['concurrency']}并发）...")
 
     # 准备数据摘要给 LLM
     now_str = datetime.now().strftime("%Y年%m月%d日")
@@ -585,21 +717,10 @@ async def generate_report(
 
     # 3.2 逐基因分析 — 预构建 prompt
     gene_prompts: dict[str, str] = {}
-    for gene in genes:
+    genes_for_llm, skipped_empty_genes = genes_with_trials_for_llm(genes, gene_data)
+    for gene in genes_for_llm:
         trials = gene_data.get(gene["id"], [])
         gene_stats = compute_stats(trials)
-        trial_details = []
-        for t in trials[:5]:
-            trial_details.append({
-                "nct_id": t.get("nct_id"),
-                "title": t.get("title", "")[:80],
-                "phase": t.get("phase"),
-                "status": t.get("status"),
-                "drugs": t.get("drugs", [])[:3],
-                "sponsor": t.get("sponsor"),
-                "countries": t.get("countries", [])[:2],
-                "start_date": t.get("start_date"),
-            })
         gene_summary = json.dumps({
             "基因": gene["name"],
             "中文名": gene.get("cn_name", ""),
@@ -609,7 +730,7 @@ async def generate_report(
             "status": gene_stats["status"],
             "countries": list(gene_stats["country"].items())[:5],
             "sponsors": list(gene_stats["sponsor"].items())[:3],
-            "代表试验": trial_details,
+            "代表试验": summarize_trials_for_prompt(trials, limit=5),
         }, ensure_ascii=False, indent=2)
 
         prompt = (
@@ -673,10 +794,17 @@ async def generate_report(
     ]
 
     for track_id, track_name, prompt_hint in tracks:
+        track_trials = track_data.get(track_id, [])
+        track_summary = json.dumps({
+            "赛道": track_name,
+            "补充检索试验数": len(track_trials),
+            "代表试验": summarize_trials_for_prompt(track_trials),
+        }, ensure_ascii=False, indent=2)
         llm_tasks.append((
             f"track_{track_id}",
             f"【当前日期：{now_str}】{prompt_hint}\n\n"
             f"本月试验数据参考：\n{data_summary}\n\n"
+            f"本赛道补充检索数据：\n{track_summary}\n\n"
             "要求：结合本月实际数据，给出有数据支撑的分析，不要泛泛而谈。严禁编造日期和药物名。",
             config, use_llm,
         ))
@@ -724,11 +852,13 @@ async def generate_report(
         config, use_llm,
     ))
 
-    # 并发执行所有 LLM 任务（2并发）
+    # 并发执行所有 LLM 任务
     total_tasks = len(llm_tasks)
-    print(f"   共 {total_tasks} 个分析任务，{_LLM_CONCURRENCY} 并发执行 ...")
+    if skipped_empty_genes:
+        print(f"   跳过 {len(skipped_empty_genes)} 个无试验数据基因的 LLM 分析")
+    print(f"   共 {total_tasks} 个分析任务，{runtime_cfg['concurrency']} 并发执行 ...")
     print("   ", end="", flush=True)
-    llm_results = llm_analyze_batch(llm_tasks)
+    llm_results = llm_analyze_batch(llm_tasks, concurrency=runtime_cfg["concurrency"])
     print(f"   ✅ 全部完成（{len(llm_results)}/{total_tasks}）\n")
 
     # 提取结果
@@ -810,12 +940,15 @@ async def main() -> None:
     parser.add_argument("--no-llm", action="store_true", help="跳过 LLM 分析，输出骨架")
     parser.add_argument("--no-cache", action="store_true", help="忽略缓存，重新搜索")
     parser.add_argument("--translate", action="store_true", help="启用试验标题翻译（默认关闭，LLM分析已为中文）")
+    parser.add_argument("--llm-concurrency", type=int, default=None, help="覆盖 LLM 并发数（1-8）")
     args = parser.parse_args()
 
     await generate_report(
         gene_filter=args.gene,
         use_llm=not args.no_llm,
         translate=args.translate,
+        use_cache=not args.no_cache,
+        llm_concurrency=args.llm_concurrency,
     )
 
 
