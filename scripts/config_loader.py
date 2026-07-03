@@ -71,7 +71,7 @@ def get_genes_by_category(category: str, config: dict | None = None) -> list[dic
 
 def get_llm_config(config: dict | None = None) -> dict[str, Any]:
     """
-    获取 LLM 配置，根据 provider 从环境变量解析实际值。
+    获取主 LLM 配置，根据 provider 从环境变量解析实际值。
 
     支持三种 provider: custom / stepfun / dashscope
 
@@ -119,6 +119,74 @@ def get_llm_config(config: dict | None = None) -> dict[str, Any]:
         "temperature": llm_cfg.get("temperature", 0.4),
         "max_tokens": llm_cfg.get("max_tokens", 2000),
     }
+
+
+def get_llm_fallback_providers(config: dict | None = None) -> list[dict[str, Any]]:
+    """
+    获取 LLM provider fallback 列表（按优先级顺序）。
+
+    从 genes.yaml 的 llm.fallback 读取 provider 顺序，
+    逐个解析为 {provider, api_key, base_url, model} 格式。
+    仅返回有 api_key 配置的 provider（跳过未配置的）。
+
+    Returns
+    -------
+    list[dict]
+        按优先级排序的 provider 配置列表，每项包含:
+        provider, api_key, base_url, model, temperature, max_tokens
+    """
+    if config is None:
+        config = load_config()
+    llm_cfg = config.get("llm", {})
+
+    # fallback 顺序 > 单 provider（向后兼容）
+    fallback_order = llm_cfg.get("fallback", [])
+    if not fallback_order:
+        # 没有 fallback 配置，则只返回主 provider
+        main = get_llm_config(config)
+        return [main] if main.get("api_key") else []
+
+    providers_cfg = llm_cfg.get("providers", {})
+    temperature = llm_cfg.get("temperature", 0.4)
+    max_tokens = llm_cfg.get("max_tokens", 2000)
+
+    result = []
+    seen = set()
+    for prov_name in fallback_order:
+        if prov_name in seen:
+            continue
+        seen.add(prov_name)
+
+        if prov_name not in providers_cfg:
+            continue
+
+        prov = providers_cfg[prov_name]
+        api_key = os.environ.get(prov.get("api_key_env", ""), "")
+        if not api_key:
+            continue  # 跳过未配置 API Key 的 provider
+
+        # base_url
+        base_url_env = prov.get("base_url_env", "")
+        base_url = os.environ.get(base_url_env, "") if base_url_env else ""
+        if not base_url:
+            base_url = prov.get("base_url_default", "") or prov.get("base_url", "")
+
+        # model
+        model = os.environ.get(
+            prov.get("model_env", ""),
+            prov.get("model_default", ""),
+        )
+
+        result.append({
+            "provider": prov_name,
+            "api_key": api_key,
+            "base_url": base_url,
+            "model": model,
+            "temperature": temperature,
+            "max_tokens": max_tokens,
+        })
+
+    return result
 
 
 def load_biomarker_patterns(config: dict | None = None) -> list[tuple[str, str]]:

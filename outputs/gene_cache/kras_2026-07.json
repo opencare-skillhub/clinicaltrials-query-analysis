@@ -1,31 +1,5 @@
 [
   {
-    "nct_id": "NCT07638371",
-    "title": "FORTRAS: A Study of MSK-TCR5 in People With Solid Tumor Cancers",
-    "phase": "Not specified",
-    "status": "RECRUITING",
-    "conditions": "",
-    "drugs": [],
-    "interventions": "MSK-TCR5 (BIOLOGICAL)",
-    "sponsor": "Memorial Sloan Kettering Cancer Center",
-    "start_date": "2026-06-09",
-    "last_update": "2026-06-15",
-    "countries": [
-      "United States"
-    ],
-    "cities": [
-      "Basking Ridge",
-      "Middletown",
-      "Montvale",
-      "Commack",
-      "Harrison"
-    ],
-    "biomarker": "BRAF V600E, ATM, MSI-H/dMMR, HER2+, ALK, MET, EGFR, VEGF, PD-L1",
-    "url": "https://clinicaltrials.gov/study/NCT07638371",
-    "_gene_id": "kras",
-    "_gene_name": "KRAS"
-  },
-  {
     "nct_id": "NCT07629960",
     "title": "A First-in-Human Trial of BLU-924 (SAR449336) in Advanced Solid Tumors Harboring KRAS Mutations",
     "phase": "Not specified",
@@ -37,6 +11,9 @@
     "interventions": "BLU-924 (DRUG)",
     "sponsor": "Blueprint Medicines Corporation",
     "start_date": "2026-06-30",
+    "first_post_date": "2026-06-05",
+    "primary_completion_date": "2029-09",
+    "completion_date": "2031-07",
     "last_update": "2026-06-05",
     "countries": [
       "United States"
@@ -44,7 +21,7 @@
     "cities": [
       "Fairfax"
     ],
-    "biomarker": "KRAS G12C, ATM, MET",
+    "biomarker": "KRAS G12C, MET",
     "url": "https://clinicaltrials.gov/study/NCT07629960",
     "_gene_id": "kras",
     "_gene_name": "KRAS"
@@ -62,6 +39,9 @@
     "interventions": "VS-7375 (DRUG); cetuximab (DRUG)",
     "sponsor": "Verastem, Inc.",
     "start_date": "2026-06-16",
+    "first_post_date": "2026-06-12",
+    "primary_completion_date": "2027-06",
+    "completion_date": "2028-12",
     "last_update": "2026-07-02",
     "countries": [
       "United States",
@@ -74,7 +54,7 @@
       "Grand Rapids",
       "St Louis"
     ],
-    "biomarker": "KRAS G12D, ATM, MET",
+    "biomarker": "KRAS G12D, MET",
     "url": "https://clinicaltrials.gov/study/NCT07644559",
     "_gene_id": "kras",
     "_gene_name": "KRAS"
@@ -91,6 +71,9 @@
     "interventions": "HRS-7058 (DRUG)",
     "sponsor": "Shandong Suncadia Medicine Co., Ltd.",
     "start_date": "2026-06-04",
+    "first_post_date": "2026-05-15",
+    "primary_completion_date": "2028-12",
+    "completion_date": "2028-12",
     "last_update": "2026-06-11",
     "countries": [
       "China"
@@ -99,93 +82,8 @@
       "Nanjing",
       "Tianjin"
     ],
-    "biomarker": "ATM, MET",
+    "biomarker": "MET",
     "url": "https://clinicaltrials.gov/study/NCT07589569",
-    "_gene_id": "kras",
-    "_gene_name": "KRAS"
-  },
-  {
-    "nct_id": "NCT07012031",
-    "title": "Sotorasib in Combination With Trastuzumab Deruxtecan for the Treatment of Locally Advanced and Metastatic Non-small Cell Lung Cancer With a KRAS G12C Mutation",
-    "phase": "Not specified",
-    "status": "RECRUITING",
-    "conditions": "",
-    "drugs": [
-      "Sotorasib"
-    ],
-    "interventions": "Biopsy Procedure (PROCEDURE); Biospecimen Collection (PROCEDURE); Computed Tomography (PROCEDURE); Echocardiography Test (PROCEDURE); Magnetic Resonance Imaging (PROCEDURE); Multigated Acquisition Scan (PROCEDURE); Sotorasib (DRUG); Trastuzumab Deruxtecan (BIOLOGICAL)",
-    "sponsor": "National Cancer Institute (NCI)",
-    "start_date": "2026-06-17",
-    "last_update": "2026-06-23",
-    "countries": [
-      "United States"
-    ],
-    "cities": [
-      "Sacramento",
-      "Tampa",
-      "Wesley Chapel",
-      "Cleveland",
-      "Columbus"
-    ],
-    "biomarker": "KRAS, ATM, HER2+, RET, MET",
-    "url": "https://clinicaltrials.gov/study/NCT07012031",
-    "_gene_id": "kras",
-    "_gene_name": "KRAS"
-  },
-  {
-    "nct_id": "NCT07468071",
-    "title": "Rollover Study for Participants Who Have Been Treated With and Are Continuing to Benefit From Opnurasib as a Single Agent or in Combination With Other Study Treatments",
-    "phase": "Not specified",
-    "status": "RECRUITING",
-    "conditions": "",
-    "drugs": [
-      "Opnurasib",
-      "TNO155",
-      "trametinib"
-    ],
-    "interventions": "Opnurasib (DRUG); TNO155 (DRUG); trametinib (DRUG); cetuximab (BIOLOGICAL); tislelizumab (BIOLOGICAL)",
-    "sponsor": "Novartis Pharmaceuticals",
-    "start_date": "2026-06-08",
-    "last_update": "2026-06-10",
-    "countries": [
-      "South Korea"
-    ],
-    "cities": [
-      "Seoul"
-    ],
-    "biomarker": "ATM",
-    "url": "https://clinicaltrials.gov/study/NCT07468071",
-    "_gene_id": "kras",
-    "_gene_name": "KRAS"
-  },
-  {
-    "nct_id": "NCT07554339",
-    "title": "A Clinical Trial of Calderasib (MK-1084) and Durvalumab in People With Non-Small Cell Lung Cancer (MK-1084-015/KANDLELIT-015)",
-    "phase": "Not specified",
-    "status": "RECRUITING",
-    "conditions": "",
-    "drugs": [
-      "Calderasib"
-    ],
-    "interventions": "Calderasib (DRUG); Durvalumab (BIOLOGICAL); Placebo to MK-1084 (OTHER)",
-    "sponsor": "Merck Sharp & Dohme LLC",
-    "start_date": "2026-06-18",
-    "last_update": "2026-06-26",
-    "countries": [
-      "United States",
-      "South Korea",
-      "Taiwan",
-      "Ukraine"
-    ],
-    "cities": [
-      "Lincoln",
-      "Suwon",
-      "Daegu",
-      "Seoul",
-      "Tainan"
-    ],
-    "biomarker": "KRAS G12C, ATM, RET, PD-L1",
-    "url": "https://clinicaltrials.gov/study/NCT07554339",
     "_gene_id": "kras",
     "_gene_name": "KRAS"
   },
@@ -203,6 +101,9 @@
     "interventions": "ELI-002 7P (DRUG); Tislelizumab (DRUG); mFOLFIRINOX (DRUG)",
     "sponsor": "Memorial Sloan Kettering Cancer Center",
     "start_date": "2026-06-22",
+    "first_post_date": "2026-06-26",
+    "primary_completion_date": "2028-06",
+    "completion_date": "2028-06",
     "last_update": "2026-06-26",
     "countries": [
       "United States"
@@ -214,7 +115,7 @@
       "Commack",
       "Harrison"
     ],
-    "biomarker": "KRAS, ATM, MET, PD-L1, PD-1/PD-L1, CTLA-4",
+    "biomarker": "KRAS, MET, PD-L1, PD-1/PD-L1, CTLA-4",
     "url": "https://clinicaltrials.gov/study/NCT07671339",
     "_gene_id": "kras",
     "_gene_name": "KRAS"

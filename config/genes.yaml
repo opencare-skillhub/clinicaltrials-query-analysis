@@ -34,14 +34,17 @@ report_defaults:
 report_window: 30d    # 过去30天滚动窗口
 
 # 月报 LLM 配置（用于深度分析段落生成）
-# provider 选项: custom(默认) | stepfun | dashscope
+# provider: 当前主 provider
+# fallback: provider fallback 顺序（按优先级），主 provider 失败时自动切换
+# 可选: custom(自定义, 如 siliconflow) | stepfun | dashscope
 #   custom    = 从 .env 读取 LLM_API_KEY/LLM_BASE_URL/LLM_MODEL
 #   stepfun   = 从 .env 读取 STEP_API_KEY/STEP_BASE_URL/STEP_MODEL
-#   dashscope = 从 .env 读取 DASHSCOPE_API_KEY + 通义千问固定配置
+#   dashscope = 从 .env 读取 DASHSCOPE_API_KEY/DASHSCOPE_URL/DASHSCOPE_MODEL
 llm:
-  provider: stepfun                     # 当前使用的 provider (stepfun上下文100万)
+  provider: custom                      # 当前使用的 provider
+  fallback: ["custom", "stepfun", "dashscope"]  # fallback 优先级顺序
   temperature: 0.4                     # 生成温度
-  max_tokens: 20000                    # 单次最大输出 token (stepfun支持长输出)
+  max_tokens: 20000                    # 单次最大输出 token
   providers:
     custom:
       api_key_env: LLM_API_KEY

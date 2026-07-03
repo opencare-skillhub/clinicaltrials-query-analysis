@@ -61,7 +61,7 @@ def _load_dotenv() -> None:
 
 _load_dotenv()
 
-from config_loader import load_config, get_report_genes, get_llm_config, get_gene_by_id
+from config_loader import load_config, get_report_genes, get_llm_config, get_gene_by_id, get_llm_fallback_providers
 from search import ClinicalTrialsSearch
 from translator import translate_fields
 
@@ -91,47 +91,65 @@ _STATUS_ICON = {
 # LLM 深度分析
 # ---------------------------------------------------------------------------
 def llm_analyze(prompt: str, config: dict[str, Any], use_llm: bool = True) -> str:
-    """调用 LLM 生成深度分析段落。无 API Key 时返回占位符。"""
+    """调用 LLM 生成深度分析段落。支持多 provider fallback。"""
     if not use_llm:
         return f"<!-- LLM 跳过。Prompt: {prompt[:100]}... -->"
 
-    llm_cfg = get_llm_config(config)
-    if not llm_cfg["api_key"]:
-        return f"> ⚠️ 未配置 LLM API Key（provider={llm_cfg.get('provider','custom')}），深度分析段落待补充。\n> Prompt: {prompt[:80]}..."
+    # 获取 fallback provider 列表
+    fallback_providers = get_llm_fallback_providers(config)
+    if not fallback_providers:
+        # 无配置的 fallback，回退到旧版单 provider
+        llm_cfg = get_llm_config(config)
+        if not llm_cfg["api_key"]:
+            return f"> ⚠️ 未配置 LLM API Key（provider={llm_cfg.get('provider','custom')}），深度分析段落待补充。\n> Prompt: {prompt[:80]}..."
+        fallback_providers = [llm_cfg]
 
     try:
         from openai import OpenAI
     except ImportError:
         return "> ⚠️ openai 库未安装，请运行 pip install openai"
 
-    try:
-        client = OpenAI(
-            api_key=llm_cfg["api_key"],
-            base_url=llm_cfg["base_url"] or None,
-        )
-        resp = client.chat.completions.create(
-            model=llm_cfg["model"],
-            messages=[
-                {
-                    "role": "system",
-                    "content": (
-                        f"当前日期：{datetime.now().strftime('%Y年%m月%d日')}。"
-                        "你是胰腺癌临床研究资深专家，擅长将临床试验数据转化为病友可理解的深度研究分析。"
-                        "要求：1) 使用真实当前日期，严禁编造日期；"
-                        "2) 专业、深入、数据驱动，避免空话套话；"
-                        "3) 重点给出清晰可执行的指引；"
-                        "4) 输出 Markdown 格式，500-800字；"
-                        "5) 如数据不足，明确说明而非编造。"
-                    ),
-                },
-                {"role": "user", "content": prompt},
-            ],
-            temperature=llm_cfg["temperature"],
-            max_tokens=llm_cfg.get("max_tokens", 2000),
-        )
-        return resp.choices[0].message.content.strip()
-    except Exception as exc:
-        return f"> ⚠️ LLM 调用失败 (provider={llm_cfg.get('provider','custom')}): {exc}"
+    errors = []
+    for idx, prov_cfg in enumerate(fallback_providers):
+        try:
+            client = OpenAI(
+                api_key=prov_cfg["api_key"],
+                base_url=prov_cfg["base_url"] or None,
+                timeout=120,
+            )
+            resp = client.chat.completions.create(
+                model=prov_cfg["model"],
+                messages=[
+                    {
+                        "role": "system",
+                        "content": (
+                            f"当前日期：{datetime.now().strftime('%Y年%m月%d日')}。"
+                            "你是胰腺癌临床研究资深专家，擅长将临床试验数据转化为病友可理解的深度研究分析。"
+                            "要求：1) 使用真实当前日期，严禁编造日期；"
+                            "2) 专业、深入、数据驱动，避免空话套话；"
+                            "3) 重点给出清晰可执行的指引；"
+                            "4) 输出 Markdown 格式，500-800字；"
+                            "5) 如数据不足，明确说明而非编造。"
+                        ),
+                    },
+                    {"role": "user", "content": prompt},
+                ],
+                temperature=prov_cfg.get("temperature", 0.4),
+                max_tokens=prov_cfg.get("max_tokens", 2000),
+            )
+            result = resp.choices[0].message.content.strip()
+            # 如果用了后续 provider，打印提示
+            if idx > 0:
+                print(f"(fb{idx}:{prov_cfg['provider']})", end=" ", flush=True)
+            return result
+        except Exception as exc:
+            err_msg = str(exc)[:60]
+            errors.append(f"{prov_cfg['provider']}: {err_msg}")
+            if idx < len(fallback_providers) - 1:
+                print(f"⚠️{prov_cfg['provider']}失败→{fallback_providers[idx+1]['provider']}", end=" ", flush=True)
+            continue
+
+    return f"> ⚠️ LLM 全部 {len(fallback_providers)} 个 provider 调用失败: {'; '.join(errors)}"
 
 
 # LLM 分析并发数（2并发，兼顾速度与API限流）
