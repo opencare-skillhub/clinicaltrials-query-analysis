@@ -1,80 +1,93 @@
 ---
 name: clinicaltrials-search
-description: 搜索 ClinicalTrials.gov 临床试验数据库。用户输入关键词（如基因名 KRAS G12D、疾病名、药物名）、时间范围、国家后，输出匹配的临床试验列表及智能总结。
+description: 胰腺癌临床试验搜索与月报分析系统。支持单基因搜索、多基因专题分析、NCCN月报生成。覆盖KRAS/CLDN18.2/HER2/BRCA/MTAP/TROP2/TF/MET/MSLN/B7-H3/Nectin-4/pan-TRK/CDH17/CEACAM5等26个胰腺癌靶点，配置化基因列表，LLM深度分析，输出专业级月报。
 ---
 
-# 临床试验搜索技能
+# 临床试验搜索与月报分析技能
 
-通过 ClinicalTrials.gov API v2 搜索全球临床试验，支持关键词、时间范围、国家多维度筛选，输出结构化试验列表与智能总结。
+基于 ClinicalTrials.gov API v2 的胰腺癌临床情报系统，提供搜索、分析、月报三大能力。
 
 ## 核心功能
 
-1. **关键词搜索**：支持基因名（KRAS G12D、BRCA1）、疾病名（pancreatic cancer）、药物名（Gemcitabine）等自由关键词
-2. **时间范围筛选**：支持指定起始/结束日期，筛选特定时间段内启动或更新的试验
-3. **国家/地区筛选**：支持按试验开展国家筛选（如 China、United States、Japan）
-4. **智能总结**：自动生成搜索结果摘要，包括靶点分布、阶段分布、热门药物、招募状态统计
-
-## 使用指南
-
-### 输入参数
-
-用户需提供以下信息（关键词为必填，其余可选）：
-
-| 参数 | 必填 | 说明 | 示例 |
-|------|------|------|------|
-| 关键词 | ✅ | 搜索关键词，支持基因、疾病、药物等 | `KRAS G12D` |
-| 开始日期 | ❌ | 筛选此日期之后启动/更新的试验 | `2024-01-01` |
-| 结束日期 | ❌ | 筛选此日期之前启动/更新的试验 | `2025-12-31` |
-| 国家 | ❌ | 试验开展国家/地区 | `China` |
-
-### 调用方式
+### 1. 单基因搜索
+搜索指定基因/靶点的临床试验，支持关键词、时间范围、国家筛选。
 
 ```bash
-# 基本搜索
-python3 scripts/search.py --keyword "KRAS G12D"
-
-# 带时间范围
-python3 scripts/search.py --keyword "KRAS G12D" --start-date 2024-01-01 --end-date 2025-12-31
-
-# 带国家筛选
-python3 scripts/search.py --keyword "pancreatic cancer immunotherapy" --country China
-
-# 完整参数
-python3 scripts/search.py --keyword "BRCA1" --start-date 2023-06-01 --end-date 2025-06-01 --country "United States" --max-results 50
+python3 scripts/search.py --keyword "KRAS G12D" --country China --max-results 50
 ```
 
-### 输出格式
+### 2. 多基因专题分析
+批量搜索多个基因并生成对比报告。
 
-输出包含两部分：
+### 3. NCCN 月报生成 📋
+生成本月胰腺癌临床试验月报，覆盖 14+ 核心靶点，LLM 深度分析，输出万字级 Markdown 报告。
 
-#### 1. 临床试验列表
+```bash
+# 生成完整月报（需 LLM_API_KEY）
+python3 scripts/report_nccn.py
 
-| # | NCT ID | 标题 | 阶段 | 状态 | 国家 | biomarker | 药物 | 链接 |
-|---|--------|------|------|------|------|-----------|------|------|
-| 1 | NCT07621718 | Zoldonrasib + Chemo... | Phase III | 招募中 | US | KRAS G12D | Zoldonrasib | [链接](https://clinicaltrials.gov/study/NCT07621718) |
+# 跳过 LLM，输出骨架
+python3 scripts/report_nccn.py --no-llm
 
-#### 2. 智能总结
+# 仅生成单基因报告
+python3 scripts/report_nccn.py --gene kras
+```
 
-- 📊 搜索结果统计（总数、招募中/暂停/已完成）
-- 🎯 靶点/Biomarker 分布
-- 💊 热门药物/干预措施排行
-- 📈 临床阶段分布
-- 🌍 地区分布（如筛选了国家）
+### 4. 交互式菜单
+```bash
+python3 scripts/main.py
+```
 
-## 资源说明
+## 基因配置
 
-- **`scripts/search.py`**: 核心搜索脚本，封装了完整的 API 调用、参数构建、结果解析和总结生成逻辑
-- **`references/api_reference.md`**: ClinicalTrials.gov API v2 查询参数与字段参考
+覆盖 26 个胰腺癌靶点，分四组：
+
+| 分组 | 基因 | 数量 |
+|------|------|------|
+| **A 指南推荐** | EGFR, KRAS, HER2(ERBB2), TROP2, CLDN18.2, BRCA1/2, ATM, BRAF V600E, NTRK, NRG1, RET, FGFR | 13 |
+| **B 临床热点** | C-MET(MET), TF(组织因子) | 2 |
+| **C 进阶靶点** | MSLN, B7-H3, Nectin-4, pan-TRK, CDH17, CEACAM5, MTAP(loss) | 7 |
+| **D 补充检测** | MUC1, FOLR1, DLL3, CA125 | 4 |
+
+配置文件: `config/genes.yaml`
+
+## 月报结构
+
+1. **本月概览** — 总体统计 + LLM 变化主题分析
+2. **靶点专区** — 每个基因的试验统计 + 临床清单 + LLM 深度分析
+3. **技术赛道** — RAS抑制剂/ADC/免疫/DDR/PROTAC/SHP2 六大赛道进展
+4. **临床清单** — 全部试验合并表格
+5. **中国可及性** — 中国试验统计 + 国产药物进展
+6. **里程碑提醒** — 3期发布/FDA批准/关键数据
+7. **术语速查** — 医学缩写一句话解释
+
+## 环境变量
+
+```bash
+# LLM 配置（月报深度分析用，无则输出骨架）
+export LLM_API_KEY="your-api-key"
+export LLM_BASE_URL="https://open.bigmodel.cn/api/paas/v4"
+export LLM_MODEL="glm-4-flash"
+```
+
+## 文件结构
+
+```
+clinicaltrials-search/
+├── config/genes.yaml          # 基因配置（26靶点）
+├── scripts/
+│   ├── search.py              # 单基因搜索
+│   ├── report_nccn.py         # 月报生成器
+│   ├── config_loader.py       # 配置加载器
+│   └── main.py                # 交互式菜单
+├── templates/report_nccn.md   # 月报模板
+├── outputs/                   # 生成的报告
+└── references/api_reference.md
+```
 
 ## 依赖
 
 - Python 3.10+
-- httpx（HTTP 异步客户端）
-- 无需 API Key（ClinicalTrials.gov 是免费公开 API）
-
-## 注意事项
-
-- API 免费但有限速，脚本内置了重试和退避机制
-- 国家筛选通过 `query.locn` 参数实现，支持国家英文名称
-- 时间范围通过 `query.term` 的 `AREA[StartDate]RANGE[...]` 语法实现
-- 默认返回最多 50 条结果，可通过 `--max-results` 调整（上限 1000）
+- httpx, PyYAML, openai
+- ClinicalTrials.gov API 免费，无需 API Key
+- LLM 分析需配置 LLM_API_KEY

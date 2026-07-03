@@ -11,17 +11,42 @@
 - **📋 双格式输出** — 交互式表格（默认）+ 纯 JSON（程序调用）
 - **🔄 自动重试** — 内置 3 次重试 + 指数退避，应对 API 限速
 - **🚫 无需 API Key** — ClinicalTrials.gov 是免费公开 API
+- **🏥 NCCN 月报** — 覆盖 20 个胰腺癌核心靶点，LLM 深度分析，输出万字级 Markdown 报告
+- **🧬 基因配置化** — 27 个靶点 YAML 配置，4 分组（指南推荐/临床热点/进阶靶点/补充检测）
+- **🖥️ 交互式菜单** — 单基因搜索 / 多基因专题 / 月报生成三合一
+
+## 🧬 基因配置（27 靶点）
+
+| 分组 | 基因 | 数量 | 月报 |
+|------|------|------|------|
+| **A 指南推荐** | EGFR, KRAS, HER2(ERBB2), TROP2, CLDN18.2, BRCA1/2, ATM, BRAF V600E, NTRK, NRG1, RET, FGFR | 13 | 部分 |
+| **B 临床热点** | SHP2, C-MET(MET), TF(组织因子) | 3 | ✅ 全部 |
+| **C 进阶靶点** | MSLN, B7-H3, Nectin-4, pan-TRK, CDH17, CEACAM5, MTAP(loss) | 7 | ✅ 全部 |
+| **D 补充检测** | MUC1, FOLR1, DLL3, CA125 | 4 | ✅ 全部 |
+
+> 月报默认覆盖 20 个基因（B+C+D 全部 + A 组的 KRAS/HER2/TROP2/CLDN18.2/BRCA1/2）
 
 ## 📦 目录结构
 
 ```
 clinicaltrials-search/
-├── README.md                    # 本文件
-├── SKILL.md                     # ZCode 技能定义文件
+├── config/
+│   └── genes.yaml                # 基因配置（27靶点，4分组）
 ├── scripts/
-│   └── search.py                # 核心搜索脚本
-└── references/
-    └── api_reference.md         # ClinicalTrials.gov API v2 参考文档
+│   ├── search.py                 # 单基因搜索
+│   ├── report_nccn.py            # NCCN月报生成器
+│   ├── config_loader.py          # 配置加载器
+│   └── main.py                   # 交互式菜单入口
+├── templates/
+│   └── report_nccn.md            # 月报模板
+├── outputs/                      # 生成的报告和缓存
+│   ├── gene_cache/               # 每基因JSON缓存
+│   └── reports/                  # 最终月报
+├── references/
+│   └── api_reference.md          # API v2 参考文档
+├── SKILL.md                      # 技能定义
+├── requirements.txt              # Python依赖
+└── README.md                     # 本文件
 ```
 
 ## 🚀 快速开始
@@ -29,7 +54,24 @@ clinicaltrials-search/
 ### 依赖安装
 
 ```bash
-pip install httpx
+pip install -r requirements.txt
+# 或手动安装
+pip install httpx PyYAML openai
+```
+
+### 三大功能入口
+
+```bash
+# 1️⃣ 交互式菜单（推荐）
+python3 scripts/main.py
+
+# 2️⃣ 单基因搜索
+python3 scripts/search.py --keyword "KRAS G12D"
+
+# 3️⃣ NCCN 月报生成
+python3 scripts/report_nccn.py              # 完整月报（需 LLM_API_KEY）
+python3 scripts/report_nccn.py --no-llm     # 跳过 LLM，输出骨架
+python3 scripts/report_nccn.py --gene kras  # 仅生成单基因报告
 ```
 
 ### 基本用法
@@ -209,6 +251,18 @@ query.term = KRAS G12D AND AREA[StartDate]RANGE[2023-01-01,2025-12-31]
 
 - Python 3.10+
 - httpx（异步 HTTP 客户端）
+- PyYAML（基因配置解析）
+- openai（LLM 深度分析，月报用）
+
+### 环境变量（月报 LLM 分析用）
+
+```bash
+# LLM 配置（月报深度分析用，无则输出骨架报告）
+export LLM_API_KEY="your-api-key"
+export LLM_BASE_URL="https://dashscope.aliyuncs.com/compatible-mode/v1"
+export LLM_MODEL="qwen-turbo"
+# 也支持 OpenAI / Groq / 智谱等 OpenAI 兼容 API
+```
 
 ## 🤖 AI Agent 部署提示词
 
