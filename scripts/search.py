@@ -242,8 +242,15 @@ class ClinicalTrialsSearch:
         # 关键词搜索 — 用 query.term 支持自由文本
         query_parts = []
 
-        # 核心关键词
-        query_parts.append(keyword)
+        # 核心关键词 — 支持多关键词变体
+        # 如果关键词已包含 OR，直接使用；否则智能扩展常见变体
+        if " OR " in keyword.upper():
+            # 用户已指定多关键词（如 "CLDN18.2 OR Claudin 18.2")
+            query_parts.append(keyword)
+        else:
+            # 自动扩展关键词变体（常见格式差异）
+            keyword_variants = self._expand_keyword_variants(keyword)
+            query_parts.append(keyword_variants)
 
         # 疾病/癌种筛选 — 使用 AREA[Condition] 字段限定
         # 默认同时匹配胰腺癌 + 实体瘤（很多靶向药试验condition写solid tumor）
@@ -410,6 +417,50 @@ class ClinicalTrialsSearch:
         except Exception as exc:
             logger.warning("Failed to parse study: %s", exc)
             return None
+
+    @staticmethod
+    def _expand_keyword_variants(keyword: str) -> str:
+        """
+        自动扩展关键词变体，覆盖常见格式差异。
+        
+        例如：
+        - CLDN18.2 → CLDN18.2 OR Claudin 18.2 OR Claudin18.2 OR Claudin (CLDN) 18.2
+        - KRAS → KRAS（无变体）
+        """
+        # 已知需要扩展的关键词映射
+        variant_map = {
+            # CLDN18.2 的多种写法
+            "CLDN18.2": "CLDN18.2 OR \"Claudin 18.2\" OR Claudin18.2 OR \"Claudin (CLDN) 18.2\"",
+            "Claudin18.2": "Claudin18.2 OR \"Claudin 18.2\" OR CLDN18.2 OR \"Claudin (CLDN) 18.2\"",
+            "Claudin 18.2": "\"Claudin 18.2\" OR CLDN18.2 OR Claudin18.2 OR \"Claudin (CLDN) 18.2\"",
+            # HER2 的多种写法
+            "HER2": "HER2 OR ERBB2",
+            "ERBB2": "ERBB2 OR HER2",
+            # MET 的多种写法
+            "MET": "MET OR C-MET OR c-Met",
+            "C-MET": "C-MET OR MET OR c-Met",
+            # TROP2 的多种写法
+            "TROP2": "TROP2 OR TACSTD2",
+            # MSLN 的多种写法
+            "MSLN": "MSLN OR Mesothelin",
+            "Mesothelin": "Mesothelin OR MSLN",
+            # B7-H3 的多种写法
+            "B7-H3": "B7-H3 OR CD276",
+            "CD276": "CD276 OR B7-H3",
+            # Nectin-4 的多种写法
+            "Nectin-4": "Nectin-4 OR NECTIN4 OR PVRL4",
+            # BRCA 的多种写法
+            "BRCA": "BRCA OR BRCA1 OR BRCA2",
+        }
+        
+        # 检查是否需要扩展
+        keyword_upper = keyword.upper()
+        for base_key, variants in variant_map.items():
+            if keyword_upper == base_key.upper() or keyword.upper() == base_key:
+                return variants
+        
+        # 无需扩展，直接返回原关键词
+        return keyword
 
     @staticmethod
     def _extract_biomarker(eligibility: str, conditions: str) -> str:
