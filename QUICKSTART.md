@@ -1,13 +1,13 @@
 # 🚀 ClinicalTrials 搜索与分析 — 快速开始
 
-> 基于 ClinicalTrials.gov API v2 的临床试验智能搜索工具。支持多维度筛选、智能 Biomarker 识别、NCCN 月报生成。
+> 基于 ClinicalTrials.gov API v2 的临床试验智能搜索工具。支持多维度筛选、智能 Biomarker 识别、NCCN 月报生成、多格式报告导出。
 
 ## 📦 安装
 
 ### 1. 依赖安装
 
 ```bash
-pip install httpx PyYAML openai
+pip install httpx PyYAML openai openpyxl python-docx fpdf2
 # 或使用 requirements.txt
 pip install -r requirements.txt
 ```
@@ -25,7 +25,7 @@ export LLM_MODEL="qwen-turbo"
 
 > 无配置时，月报生成会跳过 LLM 深度分析。
 
-## 🎯 三大功能
+## 🎯 四大功能
 
 ### 1. 交互式菜单（推荐新手）
 
@@ -38,6 +38,7 @@ python3 scripts/main.py
 - **1** — 单基因搜索
 - **2** — 多基因专题分析  
 - **3** — NCCN 月报生成
+- **4** — 多格式报告导出
 
 ### 2. 单基因搜索
 
@@ -81,6 +82,28 @@ python3 scripts/report_nccn.py --translate
 - 🇨 中国可及性分析
 - 🎯 本月里程碑
 - 📚 医学术语速查表
+
+### 4. 多格式报告导出
+
+```bash
+# 步骤1：抓取试验详细信息（PI、联络方式、中国医院）
+python3 scripts/fetch_details.py
+
+# 步骤2：一键生成 5 种格式报告
+python3 scripts/generate_reports.py
+```
+
+输出在 `outputs/{关键词}_{招募状态}/` 目录下：
+
+| 格式 | 文件 |
+|:----:|------|
+| 📝 Markdown | `CLDN18.2_RECRUITING_报告.md` |
+| 📊 Excel | `CLDN18.2_RECRUITING_报告.xlsx` |
+| 📄 Word | `CLDN18.2_RECRUITING_报告.docx` |
+| 📕 PDF | `CLDN18.2_RECRUITING_报告.pdf` |
+| 🌐 HTML | `CLDN18.2_RECRUITING_报告.html` |
+
+每条试验包含：招募状态、最近更新日期、PI（主要研究者）、中心联络方式、中国可报名医院及联系人电话。文件按搜索条件自动命名并分目录存放。
 
 ## 📊 输出示例
 

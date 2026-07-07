@@ -66,6 +66,7 @@ def print_menu() -> None:
     print("  1. 单基因搜索      — 搜索指定基因的临床试验")
     print("  2. 多基因专题分析   — 批量搜索多个基因并对比")
     print("  3. NCCN 月报生成   — 生成本月胰腺癌临床月报")
+    print("  4. 多格式报告导出  — 试验详情→MD/DOCX/PDF/XLSX/HTML 五种格式")
     print("  0. 退出")
     print()
 
@@ -290,6 +291,33 @@ async def nccn_report() -> None:
 
 
 # ---------------------------------------------------------------------------
+# 功能4：多格式报告导出
+# ---------------------------------------------------------------------------
+async def export_reports() -> None:
+    """多格式报告导出（MD/DOCX/PDF/XLSX/HTML）。"""
+    print("\n📑 多格式报告导出\n")
+
+    # 检查数据文件是否存在
+    enriched_json = os.path.join(_SKILL_ROOT, "outputs", "cldn18_2_enriched.json")
+    if not os.path.exists(enriched_json):
+        print("⏳ 尚未抓取试验详情数据，正在执行 fetch_details.py ...\n")
+        ret = os.system(f"{sys.executable} {os.path.join(_SCRIPT_DIR, 'fetch_details.py')}")
+        if ret != 0:
+            print("\n❌ 数据抓取失败，请检查网络后重试。")
+            input("\n按回车返回主菜单...")
+            return
+
+    print("⏳ 正在生成 5 种格式报告（MD / DOCX / PDF / XLSX / HTML）...\n")
+    ret = os.system(f"{sys.executable} {os.path.join(_SCRIPT_DIR, 'generate_reports.py')}")
+    if ret == 0:
+        print("\n✅ 报告导出完成！请查看 outputs/CLDN18.2_RECRUITING/ 目录")
+    else:
+        print("\n❌ 报告生成失败，请检查依赖是否完整（openpyxl, python-docx, fpdf2）")
+
+    input("\n按回车返回主菜单...")
+
+
+# ---------------------------------------------------------------------------
 # 主循环
 # ---------------------------------------------------------------------------
 async def main() -> None:
@@ -298,7 +326,7 @@ async def main() -> None:
         print_header()
         print_menu()
 
-        choice = input("请输入选项 [0-3]: ").strip()
+        choice = input("请输入选项 [0-4]: ").strip()
 
         if choice == "0":
             print("\n👋 再见！\n")
@@ -309,6 +337,8 @@ async def main() -> None:
             await multi_gene_analysis()
         elif choice == "3":
             await nccn_report()
+        elif choice == "4":
+            await export_reports()
         else:
             print("\n⚠️ 无效选项，请重新输入。")
             await asyncio.sleep(1)

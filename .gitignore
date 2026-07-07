@@ -3,3 +3,4 @@ __pycache__/
 *.pyc
 .env
 outputs/gene_cache/
+outputs/cldn18_2_enriched.json

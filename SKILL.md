@@ -1,11 +1,11 @@
 ---
 name: clinicaltrials-search
-description: 胰腺癌临床试验搜索与月报分析系统。支持单基因搜索、多基因专题分析、NCCN月报生成。覆盖KRAS/CLDN18.2/HER2/BRCA/MTAP/TROP2/TF/MET/MSLN/B7-H3/Nectin-4/pan-TRK/CDH17/CEACAM5等26个胰腺癌靶点，配置化基因列表，LLM深度分析，输出专业级月报。
+description: 胰腺癌临床试验搜索与月报分析系统。支持单基因搜索、多基因专题分析、NCCN月报生成、多格式报告导出。覆盖KRAS/CLDN18.2/HER2/BRCA/MTAP/TROP2/TF/MET/MSLN/B7-H3/Nectin-4/pan-TRK/CDH17/CEACAM5等26个胰腺癌靶点，配置化基因列表，LLM深度分析，输出专业级月报。
 ---
 
 # 临床试验搜索与月报分析技能
 
-基于 ClinicalTrials.gov API v2 的胰腺癌临床情报系统，提供搜索、分析、月报三大能力。
+基于 ClinicalTrials.gov API v2 的胰腺癌临床情报系统，提供搜索、分析、月报、报告导出四大能力。
 
 ## 核心功能
 
@@ -33,10 +33,29 @@ python3 scripts/report_nccn.py --no-llm
 python3 scripts/report_nccn.py --gene kras
 ```
 
-### 4. 交互式菜单
+### 4. 多格式报告导出 📑
+将搜索结果一键导出为 5 种格式，每种包含完整联络信息。
+
+```bash
+# 步骤1：抓取试验详细信息（PI、联络方式、中国医院）
+python3 scripts/fetch_details.py
+
+# 步骤2：生成 MD/DOCX/PDF/XLSX/HTML 报告
+python3 scripts/generate_reports.py
+```
+
+输出按搜索条件组织在 `outputs/{关键词}_{状态}/` 目录下，包含：
+- 招募状态、最近更新日期
+- PI（主要研究者）姓名及机构
+- 中心联络电话/邮箱
+- 中国可报名医院列表及联系人
+
+### 5. 交互式菜单
 ```bash
 python3 scripts/main.py
 ```
+
+菜单集成：1-单基因搜索 / 2-多基因专题 / 3-月报生成 / 4-报告导出
 
 ## 基因配置
 
@@ -79,15 +98,20 @@ clinicaltrials-search/
 │   ├── search.py              # 单基因搜索
 │   ├── report_nccn.py         # 月报生成器
 │   ├── config_loader.py       # 配置加载器
-│   └── main.py                # 交互式菜单
+│   ├── translator.py          # 翻译模块
+│   ├── main.py                # 交互式菜单
+│   ├── fetch_details.py       # 单试验详情抓取（PI/联络/中国医院）
+│   └── generate_reports.py    # 多格式报告导出（5种格式）
 ├── templates/report_nccn.md   # 月报模板
 ├── outputs/                   # 生成的报告
+│   ├── CLDN18.2_RECRUITING/   # 按搜索条件命名的子目录
+│   └── cldn18_2_enriched.json # 详情缓存
 └── references/api_reference.md
 ```
 
 ## 依赖
 
 - Python 3.10+
-- httpx, PyYAML, openai
+- httpx, PyYAML, openai, openpyxl, python-docx, fpdf2
 - ClinicalTrials.gov API 免费，无需 API Key
 - LLM 分析需配置 LLM_API_KEY
