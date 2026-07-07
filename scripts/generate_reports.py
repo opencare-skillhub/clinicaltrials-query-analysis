@@ -2,10 +2,12 @@
 """
 将 CLDN18.2 临床试验数据生成 MD / DOCX / PDF / XLSX / HTML 五种格式报告。
 从 enriched JSON 数据读取，包含完整字段：招募状态、最近更新、PI、联络方式、中国可报名医院及联系人。
+输出采用中英文对照格式，方便国内外用户阅读。
 """
 
 import json
 import os
+import re
 from datetime import datetime
 
 BASE_DIR = os.path.dirname(__file__)
@@ -27,10 +29,178 @@ os.makedirs(OUTPUT_DIR, exist_ok=True)
 # 文件基础名
 FILE_BASENAME = f"{SEARCH_KEYWORD}_{SEARCH_STATUS}"
 
+# ── 中英文翻译映射表 ──────────────────────────────────────
+
+# 临床阶段翻译
+PHASE_CN = {
+    "PHASE1": "I期",
+    "PHASE2": "II期",
+    "PHASE3": "III期",
+    "PHASE4": "IV期",
+    "EARLY_PHASE1": "早期I期",
+    "NOT_APPLICABLE": "不适用",
+}
+
+def trans_phase(phase_en):
+    """翻译临床阶段，如 'PHASE1/PHASE2' → 'I/II期 (PHASE1/PHASE2)'"""
+    if not phase_en or phase_en == "Not specified":
+        return "未指定 (Not specified)"
+    parts = phase_en.split("/")
+    cn_parts = [PHASE_CN.get(p, p) for p in parts]
+    return f"{'/'.join(cn_parts)} ({phase_en})"
+
+# 常见癌种/适应症翻译
+CONDITION_TRANSLATIONS = {
+    "Gastric Adenocarcinoma": "胃腺癌",
+    "Gastroesophageal Junction Adenocarcinoma": "胃食管结合部腺癌",
+    "Gastric or Gastroesophageal Junction Adenocarcinoma": "胃或胃食管结合部腺癌",
+    "Pancreatic Ductal Adenocarcinoma": "胰腺导管腺癌",
+    "Pancreatic Cancer": "胰腺癌",
+    "Biliary Tract Cancer": "胆道癌",
+    "Solid Tumor": "实体瘤",
+    "Advanced Solid Tumor": "晚期实体瘤",
+    "Malignant Solid Tumor": "恶性实体瘤",
+    "Advanced Malignant Solid Tumor": "晚期恶性实体瘤",
+    "Colorectal Cancer": "结直肠癌",
+    "Esophageal Adenocarcinoma": "食管腺癌",
+    "Esophageal Cancer": "食管癌",
+    "Breast Cancer": "乳腺癌",
+    "Non-small Cell Lung Cancer": "非小细胞肺癌",
+    "Ovarian Cancer": "卵巢癌",
+    "Peritoneal Metastasis": "腹膜转移",
+    "Brain Metastasis": "脑转移",
+    "Metastatic": "转移性",
+    "Locally Advanced": "局部晚期",
+    "Unresectable": "不可切除",
+    "Resectable": "可切除",
+    "Advanced": "晚期",
+    "First-line": "一线",
+    "Second-line": "二线",
+    "Neoadjuvant": "新辅助",
+    "Adjuvant": "辅助",
+    "Perioperative": "围手术期",
+    "HER2-positive": "HER2阳性",
+    "HER2-negative": "HER2阴性",
+    "CLDN18.2-positive": "CLDN18.2阳性",
+    "PD-L1": "PD-L1",
+    "MSI-H": "MSI-H（高度微卫星不稳定）",
+    "dMMR": "dMMR（错配修复缺陷）",
+}
+
+def trans_conditions(conditions_en):
+    """翻译适应症描述，保持中英对照"""
+    if not conditions_en:
+        return "—"
+    # 尝试整句匹配
+    if conditions_en in CONDITION_TRANSLATIONS:
+        cn = CONDITION_TRANSLATIONS[conditions_en]
+        return f"{cn} ({conditions_en})"
+    # 按分隔符拆分逐段翻译
+    parts = re.split(r' \| ', conditions_en)
+    cn_parts = []
+    for part in parts:
+        part = part.strip()
+        if part in CONDITION_TRANSLATIONS:
+            cn_parts.append(CONDITION_TRANSLATIONS[part])
+        else:
+            cn_parts.append(part)
+    cn_text = " | ".join(cn_parts)
+    if cn_text != conditions_en:
+        return f"{cn_text}（{conditions_en}）"
+    return conditions_en
+
+# 已知 CLDN18.2 靶向药物的中文名（后续可扩展）
+DRUG_CN = {
+    "Spevatamig (PT886)": "Spevatamig (PT886，CLDN18.2 ADC)",
+    "LM-302": "LM-302（CLDN18.2 ADC）",
+    "SHR-A1904": "SHR-A1904（CLDN18.2 ADC）",
+    "IBI343": "IBI343（CLDN18.2 ADC）",
+    "SG1906": "SG1906（CLDN18.2 ADC）",
+    "RC118": "RC118（CLDN18.2 ADC）",
+    "SKB315": "SKB315（CLDN18.2 ADC）",
+    "JS107": "JS107（CLDN18.2 ADC）",
+    "Zolbetuximab": "Zolbetuximab（CLDN18.2 单抗）",
+    "AZD0901": "AZD0901（CLDN18.2 ADC）",
+    "AZD5863": "AZD5863（CLDN18.2 ADC）",
+    "AZD4360": "AZD4360（CLDN18.2 ADC）",
+    "BDC-4182": "BDC-4182（CLDN18.2 ADC）",
+    "ASP2138": "ASP2138（CLDN18.2/CD3 双抗）",
+    "ASP546C": "ASP546C（CLDN18.2 双抗）",
+    "CT041": "CT041（CLDN18.2 CAR-T）",
+    "TST001": "TST001（CLDN18.2 单抗）",
+    "Givastomig": "Givastomig（CLDN18.2 单抗）",
+    "DA-3501": "DA-3501（CLDN18.2 双抗）",
+    "Sonesitatug vedotin": "Sonesitatug vedotin（CLDN18.2 ADC）",
+    "QLS31905": "QLS31905（CLDN18.2 双抗）",
+    "XNW27011": "XNW27011（CLDN18.2 ADC）",
+    "SIBP-A18": "SIBP-A18（CLDN18.2 ADC）",
+    "XKDCT225": "XKDCT225（CLDN18.2 CAR-T）",
+}
+
+def annotate_drug(title):
+    """在标题中标注药物中文名"""
+    for en, cn in DRUG_CN.items():
+        if en.lower() in title.lower():
+            return title.replace(en, cn)
+    return title
+
+# ── LLM 翻译集成 ──────────────────────────────────────────
+# 尝试使用 translator.py 翻译标题和适应症（如有 LLM 配置）
+# 无 LLM 时静默降级为静态映射
+
+def _try_llm_translate(trials):
+    """尝试用 LLM 翻译标题和适应症，失败则返回空字典。"""
+    try:
+        from translator import translate_fields
+        from config_loader import load_config
+    except ImportError:
+        return {}
+
+    # 检查是否有 LLM 配置，无则快速跳过
+    config = load_config()
+    if not config.get("llm", {}).get("api_key"):
+        return {}
+
+    print("\n🌐 正在尝试 LLM 翻译标题和适应症（中英对照）...")
+    print("   （如无需翻译可 Ctrl+C 跳过，自动降级为静态映射）")
+    try:
+        translations = translate_fields(
+            items=trials,
+            fields=["title", "conditions"],
+            key_field="nct_id",
+            domain="临床试验",
+            config=config,
+        )
+        if translations:
+            print(f"   ✅ LLM 翻译成功：{len(translations)} 项\n")
+        else:
+            print("   ⚠️ LLM 翻译未返回结果，使用静态映射\n")
+        return translations
+    except Exception as e:
+        print(f"   ⚠️ LLM 翻译失败（{str(e)[:60]}），使用静态映射\n")
+        return {}
+
+
 # ── 加载数据 ──────────────────────────────────────────────
 
 with open(ENRICHED_JSON, "r", encoding="utf-8") as f:
     raw_trials = json.load(f)
+
+# LLM 翻译标题和适应症（中英对照）
+llm_translations = _try_llm_translate(raw_trials)
+
+# 将翻译合并回 trial 数据
+for t in raw_trials:
+    nct = t["nct_id"]
+    tr = llm_translations.get(nct, {})
+    # LLM 翻译的标题（如有）
+    t["title_cn"] = tr.get("title", "")
+    # LLM 翻译的适应症（如有）
+    t["conditions_cn"] = tr.get("conditions", "")
+    # 静态药物中文标注
+    t["title_annotated"] = annotate_drug(t.get("title", ""))
+    # 临床阶段翻译
+    t["phase_cn"] = trans_phase(t.get("phase", ""))
 
 # 按治疗类型分组（使用 NCT ID 查找 enriched 数据）
 TRIAL_GROUPS = {
@@ -186,13 +356,28 @@ def generate_md():
             china_locs = t.get("china_locations", [])
             china_hosp = fmt_china_hospitals(china_locs)
 
-            lines.append(f"### {emoji} [{nct}]({url}) — {t['title']}\n")
-            lines.append(f"| 字段 | 内容 |")
-            lines.append(f"|------|------|")
-            lines.append(f"| **招募状态** | {st_cn} ({st}) |")
+            # 中英对照：优先用 LLM 翻译，静态映射兜底
+            title_cn = t.get("title_cn", "")
+            title_annotated = t.get("title_annotated", "")
+            phase_cn = t.get("phase_cn", "")
+            cond_en = t.get("conditions", "")
+            cond_cn = t.get("conditions_cn", "") or trans_conditions(cond_en)
+
+            # 标题行：LLM 翻译（CN）+ 英文原题（EN）
+            if title_cn:
+                title_display = f"**CN:** {title_cn}  \n**EN:** {title_annotated}"
+            else:
+                title_display = f"**{title_annotated}**"
+
+            lines.append(f"### {emoji} [{nct}]({url})\n")
+            lines.append(f"{title_display}\n")
+            lines.append(f"| 字段 | 内容（中文 / English） |")
+            lines.append(f"|------|------------------------|")
+            lines.append(f"| **招募状态** | 🟢 {st_cn} ({st}) |")
+            lines.append(f"| **临床阶段** | {phase_cn} |")
             lines.append(f"| **最近更新** | {lu} |")
             lines.append(f"| **申办方** | {t.get('sponsor','') or '—'} |")
-            lines.append(f"| **适应症** | {t.get('conditions','') or '—'} |")
+            lines.append(f"| **适应症** | {cond_cn} |")
             lines.append(f"| **PI（主要研究者）** | {pi} |")
             lines.append(f"| **中心联络** | {cc} |")
             if china_locs:
@@ -268,7 +453,7 @@ def generate_xlsx():
         ws = wb.create_sheet(title=safe_name)
         headers = [
             "试验编号", "药物/方案", "适应症", "申办方",
-            "招募状态", "最近更新", "PI（主要研究者）",
+            "招募状态", "临床阶段 (Phase)", "最近更新", "PI（主要研究者）",
             "中心联络", "中国可报名医院及联络人"
         ]
         for col, h in enumerate(headers, 1):
@@ -300,12 +485,17 @@ def generate_xlsx():
             else:
                 china_str = "—"
 
+            phase_cn = t.get("phase_cn", "")
+            cond_cn = t.get("conditions_cn", "") or trans_conditions(t.get("conditions", ""))
+            title_cn = t.get("title_cn", "")
+            title_display = f"{title_cn} | {t.get('title_annotated', t.get('title',''))}" if title_cn else t.get("title_annotated", t.get("title",""))
             data = [
                 nct,
-                t.get("title", ""),
-                t.get("conditions", ""),
+                title_display,
+                cond_cn,
                 t.get("sponsor", ""),
                 st,
+                phase_cn,
                 lu,
                 pi,
                 cc,
@@ -321,10 +511,11 @@ def generate_xlsx():
         ws.column_dimensions["C"].width = 30
         ws.column_dimensions["D"].width = 22
         ws.column_dimensions["E"].width = 12
-        ws.column_dimensions["F"].width = 14
-        ws.column_dimensions["G"].width = 30
+        ws.column_dimensions["F"].width = 18
+        ws.column_dimensions["G"].width = 14
         ws.column_dimensions["H"].width = 30
-        ws.column_dimensions["I"].width = 45
+        ws.column_dimensions["I"].width = 30
+        ws.column_dimensions["J"].width = 45
 
     path = os.path.join(OUTPUT_DIR, f"{FILE_BASENAME}_报告.xlsx")
     wb.save(path)
@@ -381,14 +572,24 @@ def generate_docx():
             cc = fmt_contact(t.get("central_contact"))
             china_locs = t.get("china_locations", [])
 
-            doc.add_heading(f"{emoji} {nct} — {t['title']}", level=2)
+            title_cn = t.get("title_cn", "")
+            title_annotated = t.get("title_annotated", "")
+            phase_cn = t.get("phase_cn", "")
+            cond_cn = t.get("conditions_cn", "") or trans_conditions(t.get("conditions", ""))
+
+            if title_cn:
+                doc.add_heading(f"{emoji} {nct}", level=2)
+                doc.add_paragraph(f"CN: {title_cn}\nEN: {title_annotated}")
+            else:
+                doc.add_heading(f"{emoji} {nct} — {title_annotated}", level=2)
 
             # 信息表格
             info_rows = [
                 ("招募状态", f"{st_cn} ({st})"),
+                ("临床阶段", phase_cn),
                 ("最近更新", lu),
                 ("申办方", t.get("sponsor", "") or "—"),
-                ("适应症", t.get("conditions", "") or "—"),
+                ("适应症", cond_cn),
                 ("PI（主要研究者）", pi),
                 ("中心联络", cc),
             ]
@@ -491,14 +692,22 @@ def generate_pdf():
             pi = fmt_pi(t.get("pi"))
             china_locs = t.get("china_locations", [])
 
-            # 标题行
+            title_cn = t.get("title_cn", "")
+            title_annotated = t.get("title_annotated", "")
+            phase_cn = t.get("phase_cn", "")
+            cond_cn = t.get("conditions_cn", "") or trans_conditions(t.get("conditions", ""))
+
+            # 标题行（优先显示 LLM 中文翻译）
             pdf.set_font("zh", "B", 8)
-            title_text = f"{emoji} {nct} {t['title'][:80]}{'...' if len(t.get('title',''))>80 else ''}"
-            pdf.cell(0, 6, title_text, new_x="LMARGIN", new_y="NEXT")
+            if title_cn:
+                title_short = title_cn[:80] + ('...' if len(title_cn) > 80 else '')
+            else:
+                title_short = title_annotated[:80] + ('...' if len(title_annotated) > 80 else '')
+            pdf.cell(0, 6, f"{emoji} {nct} {title_short}", new_x="LMARGIN", new_y="NEXT")
 
             # 详情行
             pdf.set_font("zh", "", 7)
-            details = f"  状态: {st_cn}  |  更新: {lu}  |  PI: {pi}"
+            details = f"  状态: {st_cn}  |  阶段: {phase_cn}  |  适应症: {cond_cn[:60]}{'...' if len(cond_cn)>60 else ''}  |  更新: {lu}  |  PI: {pi}"
             pdf.cell(0, 5, details, new_x="LMARGIN", new_y="NEXT")
 
             # 中国医院
@@ -554,6 +763,7 @@ def generate_html():
   .trial-card .title {{ font-size: 14px; font-weight: bold; color: #1a237e; }}
   .trial-card .title a {{ text-decoration: none; }}
   .trial-card .title a:hover {{ text-decoration: underline; }}
+  .trial-card .title-cn {{ font-size: 14px; font-weight: bold; color: #1a237e; margin-top: 2px; }}
   .info-grid {{ display: grid; grid-template-columns: auto 1fr; gap: 4px 12px; margin-top: 8px; font-size: 13px; }}
   .info-grid .label {{ color: #888; font-weight: 500; min-width: 100px; }}
   .info-grid .value {{ color: #333; }}
@@ -595,14 +805,25 @@ def generate_html():
             cc = fmt_contact(t.get("central_contact"))
             china_locs = t.get("china_locations", [])
 
+            title_cn = t.get("title_cn", "")
+            title_annotated = t.get("title_annotated", "")
+            phase_cn = t.get("phase_cn", "")
+            cond_cn = t.get("conditions_cn", "") or trans_conditions(t.get("conditions", ""))
+
             badge_class = "badge-rec" if st == "RECRUITING" else "badge-pause"
             html += f'<div class="trial-card {"recruiting" if st=="RECRUITING" else ""}">'
-            html += f'<div class="title">{emoji} <a href="{t["url"]}" target="_blank">{nct}</a> — {t["title"]}</div>'
+            if title_cn:
+                html += f'<div class="title">{emoji} <a href="{t["url"]}" target="_blank">{nct}</a></div>'
+                html += f'<div class="title-cn">🇨🇳 {title_cn}</div>'
+                html += f'<div class="title-en" style="font-size:12px;color:#666;margin-top:2px;">🇬🇧 {title_annotated}</div>'
+            else:
+                html += f'<div class="title">{emoji} <a href="{t["url"]}" target="_blank">{nct}</a> — {title_annotated}</div>'
             html += f'<div class="info-grid">'
             html += f'<span class="label">招募状态</span><span class="value"><span class="badge {badge_class}">{st_cn}</span></span>'
+            html += f'<span class="label">临床阶段</span><span class="value">{phase_cn}</span>'
             html += f'<span class="label">最近更新</span><span class="value">{lu}</span>'
             html += f'<span class="label">申办方</span><span class="value">{t.get("sponsor","") or "—"}</span>'
-            html += f'<span class="label">适应症</span><span class="value">{t.get("conditions","") or "—"}</span>'
+            html += f'<span class="label">适应症</span><span class="value">{cond_cn}</span>'
             html += f'<span class="label">PI</span><span class="value">{pi}</span>'
             html += f'<span class="label">中心联络</span><span class="value">{cc}</span>'
             if china_locs:
