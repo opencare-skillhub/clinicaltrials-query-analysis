@@ -9,7 +9,7 @@
 - **📊 智能总结** — 自动生成搜索结果统计、阶段分布、靶点分布、热门药物、地区分布、申办方排行
 - **🌍 全球覆盖** — 覆盖 ClinicalTrials.gov 所有注册试验，支持 50+ 国家/地区筛选
 - **📋 双格式输出** — 交互式表格（默认）+ 纯 JSON（程序调用）
-- **🔄 智能重试** — 内置 5 重试 + 指数退避 + User-Agent，403 限流容错
+- **🔄 智能重试** — 内置 5 重试 + 指数退避 + User-Agent，403 限流容错；整次搜索受总时间预算约束（默认 40s），不会无限重试
 - **🚫 无需 API Key** — ClinicalTrials.gov 是免费公开 API
 - **🏥 NCCN 月报** — 覆盖 27 个胰腺癌核心靶点，LLM 深度分析，输出万字级 Markdown 报告
 - **⚡ 并发优化** — LLM 分析 2 并发，月报生成速度翻倍
@@ -114,24 +114,25 @@ python3 scripts/generate_reports.py               # 生成 5 种格式报告
 | `--start-date` | `-s` | ❌ | 起始日期 (YYYY-MM-DD) | — |
 | `--end-date` | `-e` | ❌ | 结束日期 (YYYY-MM-DD) | — |
 | `--country` | `-c` | ❌ | 试验开展国家（英文名，如 China, United States） | — |
-| `--status` | ❌ | 招募状态筛选 | RECRUITING,ACTIVE_NOT_RECRUITING |
-	| `--max-results` | `-n` | ❌ | 最大返回结果数 | 50（上限 1000） |
-	| `--json` | ❌ | 以 JSON 格式输出（提示信息走 stderr） | — |
+| `--status` | — | ❌ | 招募状态筛选 | `RECRUITING,ACTIVE_NOT_RECRUITING` |
+| `--max-results` | `-n` | ❌ | 最大返回结果数 | 50（上限 1000） |
+| `--timeout` | — | ❌ | 整次搜索的总时间预算（秒）；用尽即停止重试并返回部分结果 | 40 |
+| `--json` | — | ❌ | 以 JSON 格式输出（提示信息走 stderr） | — |
 
-	### 报告导出用法
+### 报告导出用法
 
-	```bash
-	# 1. 抓取试验详情（PI、联络方式、中国医院联系人）
-	python3 scripts/fetch_details.py
+```bash
+# 1. 抓取试验详情（PI、联络方式、中国医院联系人）
+python3 scripts/fetch_details.py
 
-	# 2. 一键生成五种格式报告
-	python3 scripts/generate_reports.py
-	```
+# 2. 一键生成五种格式报告
+python3 scripts/generate_reports.py
+```
 
-	输出目录：`outputs/{关键词}_{状态}/`
-	支持格式：MD、DOCX、PDF（横向A4）、XLSX（多Sheet）、HTML（响应式卡片）
+输出目录：`outputs/{关键词}_{状态}/`
+支持格式：MD、DOCX、PDF（横向A4）、XLSX（多Sheet）、HTML（响应式卡片）
 
-	### 基本用法
+### 基本用法
 
 ```bash
 # 1. 关键词搜索（必填）
@@ -153,7 +154,26 @@ python3 scripts/search.py \
 
 # 5. JSON 输出（便于程序调用）
 python3 scripts/search.py --keyword "KRAS G12D" --max-results 10 --json
+
+# 6. 放宽总时间预算（默认 40s；宿主工具的超时也要相应放宽）
+python3 scripts/search.py --keyword "KRAS G12D" --timeout 120
 ```
+
+### 总时间预算与 `--timeout`
+
+单次请求最多等 45s、最多重试 5 次（403 限流退避更久），累加最坏可达约 5 分钟。在带工具超时的宿主里
+（例如 PI-Desktop / OpenClaw 的 Bash 工具默认 60s），这会表现为「脚本卡住一会儿之后被强行杀掉」，
+使用者只看到一句 `bash timed out`，看不出到底发生了什么。
+
+因此整次搜索受一个**总时间预算**约束，默认 **40s**：
+
+- 预算同时约束三处：每页开始前、单次请求超时、每次退避等待；
+- 预算用尽时**停止重试并返回已获得的结果**，同时明确打印
+  `⚠️ 已达总时间预算 Ns，结果是部分结果`，而不是静默失败；
+- 需要更久时显式放宽：`--timeout 120`。**宿主侧的工具超时也要同步放宽**
+  （例如给 Bash 工具 `timeoutMs` ≥ 120000），否则仍会先被宿主杀掉；
+- 退出码不变（查不到结果同样返回 0）；脚本调用方可用 `client.budget_exhausted`
+  区分「没有结果」和「没查完」。
 
 ## 📊 输出示例
 

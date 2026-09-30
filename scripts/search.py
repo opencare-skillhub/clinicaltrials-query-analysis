@@ -18,6 +18,7 @@ import asyncio
 import json
 import logging
 import sys
+import time
 from collections import Counter
 from datetime import datetime
 from typing import Any
@@ -36,6 +37,12 @@ _DEFAULT_PAGE_SIZE = 100
 _REQUEST_TIMEOUT = 45.0  # 更长超时
 _MAX_RETRIES = 5
 _RETRY_DELAY = 2.0  # 更保守的退避时间
+
+#: 整次搜索的总时间预算（秒）。重试会累加：5 × 45s 请求加退避最坏约 5 分钟，
+#: 而宿主（如 PI-Desktop 的 Bash 工具）默认 60s 就杀进程，使用者只会看到
+#: "bash timed out"。预算用尽时主动停止重试、保留已有结果并说明原因。
+#: 需要更久时用 --timeout 放宽（宿主侧也要给足 timeoutMs）。
+_TOTAL_BUDGET = 40.0
 
 # 已知胰腺癌/肿瘤 Biomarker（用于从入排标准中提取）
 _BIOMARKER_PATTERNS: list[tuple[str, str]] = [
@@ -93,6 +100,30 @@ _BIOMARKER_PATTERNS: list[tuple[str, str]] = [
     ("PD-L1", "PD-L1"),
     ("PD-1", "PD-1/PD-L1"),
     ("CTLA-4", "CTLA-4"),
+    ("CLDN18.2", "CLDN18.2"),
+    ("CLAUDIN 18.2", "CLDN18.2"),
+    ("CLAUDIN18.2", "CLDN18.2"),
+    ("TROP2", "TROP2"),
+    ("TACSTD2", "TROP2"),
+    ("TISSUE FACTOR", "Tissue Factor"),
+    ("MSLN", "MSLN"),
+    ("MESOTHELIN", "MSLN"),
+    ("B7-H3", "B7-H3"),
+    ("B7H3", "B7-H3"),
+    ("CD276", "B7-H3"),
+    ("NECTIN-4", "Nectin-4"),
+    ("NECTIN4", "Nectin-4"),
+    ("PVRL4", "Nectin-4"),
+    ("PAN-TRK", "pan-TRK"),
+    ("CDH17", "CDH17"),
+    ("CEACAM5", "CEACAM5"),
+    ("MTAP", "MTAP"),
+    ("MUC1", "MUC1"),
+    ("FOLR1", "FOLR1"),
+    ("FOLATE RECEPTOR", "FOLR1"),
+    ("DLL3", "DLL3"),
+    ("CA125", "CA125"),
+    ("MUC16", "CA125"),
     ("CAR-T", "CAR-T"),
     ("TCR-T", "TCR-T"),
 ]
@@ -107,7 +138,15 @@ logger = logging.getLogger(__name__)
 class ClinicalTrialsSearch:
     """ClinicalTrials.gov API v2 搜索客户端。"""
 
-    def __init__(self, timeout: float = _REQUEST_TIMEOUT) -> None:
+    def __init__(
+        self,
+        timeout: float = _REQUEST_TIMEOUT,
+        total_budget: float = _TOTAL_BUDGET,
+    ) -> None:
+        self._request_timeout = timeout
+        self._total_budget = total_budget
+        #: 因总预算用尽而提前结束，供调用方区分「没有结果」与「没查完」。
+        self.budget_exhausted = False
         self._client = httpx.AsyncClient(
             timeout=timeout,
             headers={
@@ -166,11 +205,21 @@ class ClinicalTrialsSearch:
         if status is None:
             status = "RECRUITING,ACTIVE_NOT_RECRUITING"
 
+        deadline = time.monotonic() + self._total_budget
         all_trials: list[dict[str, Any]] = []
         page_token: str | None = None
         page_size = min(max_results, 100)
 
         while len(all_trials) < max_results:
+            if time.monotonic() >= deadline:
+                self.budget_exhausted = True
+                logger.error(
+                    "总预算 %.0fs 已用完，停止搜索（已获得 %d 条）",
+                    self._total_budget,
+                    len(all_trials),
+                )
+                break
+
             params = self._build_params(
                 keyword=keyword,
                 start_date=start_date,
@@ -182,7 +231,7 @@ class ClinicalTrialsSearch:
                 disease=disease,
             )
 
-            raw_studies, next_token = await self._fetch_page(params)
+            raw_studies, next_token = await self._fetch_page(params, deadline)
             if not raw_studies:
                 break
 
@@ -278,12 +327,25 @@ class ClinicalTrialsSearch:
         return params
 
     async def _fetch_page(
-        self, params: dict[str, Any]
+        self, params: dict[str, Any], deadline: float
     ) -> tuple[list[dict[str, Any]], str | None]:
-        """获取单页结果，返回 (studies, next_page_token)。"""
+        """获取单页结果，返回 (studies, next_page_token)。
+
+        每次尝试都受 ``deadline`` 约束：单次请求超时压到剩余预算以内，退避
+        等待也不越过它，所以整个搜索不会比 ``_total_budget`` 多跑太久。
+        """
         for attempt in range(1, _MAX_RETRIES + 1):
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                self.budget_exhausted = True
+                logger.error("总预算已用完，放弃第 %d 次尝试", attempt)
+                break
             try:
-                resp = await self._client.get(_BASE_URL, params=params)
+                resp = await self._client.get(
+                    _BASE_URL,
+                    params=params,
+                    timeout=min(self._request_timeout, remaining),
+                )
                 resp.raise_for_status()
                 data = resp.json()
                 studies = data.get("studies", [])
@@ -298,14 +360,17 @@ class ClinicalTrialsSearch:
                     _MAX_RETRIES,
                 )
                 if exc.response.status_code == 429:
-                    await asyncio.sleep(_RETRY_DELAY * attempt * 2)
+                    delay = _RETRY_DELAY * attempt * 2
                 elif exc.response.status_code == 403:
                     # 403 通常是临时限流，退避重试
-                    await asyncio.sleep(_RETRY_DELAY * attempt * 3)
+                    delay = _RETRY_DELAY * attempt * 3
                 elif exc.response.status_code >= 500:
-                    await asyncio.sleep(_RETRY_DELAY * attempt)
+                    delay = _RETRY_DELAY * attempt
                 else:
                     break
+                await asyncio.sleep(
+                    min(delay, max(0.0, deadline - time.monotonic()))
+                )
 
             except (httpx.RequestError, httpx.DecodingError) as exc:
                 logger.warning(
@@ -314,7 +379,12 @@ class ClinicalTrialsSearch:
                     _MAX_RETRIES,
                     exc,
                 )
-                await asyncio.sleep(_RETRY_DELAY * attempt)
+                await asyncio.sleep(
+                    min(
+                        _RETRY_DELAY * attempt,
+                        max(0.0, deadline - time.monotonic()),
+                    )
+                )
 
         logger.error("Fetch failed after %d attempts", _MAX_RETRIES)
         return [], None
@@ -445,10 +515,23 @@ class ClinicalTrialsSearch:
             "MSLN": "MSLN OR Mesothelin",
             "Mesothelin": "Mesothelin OR MSLN",
             # B7-H3 的多种写法
-            "B7-H3": "B7-H3 OR CD276",
-            "CD276": "CD276 OR B7-H3",
+            "B7-H3": "B7-H3 OR B7H3 OR CD276",
+            "B7H3": "B7H3 OR B7-H3 OR CD276",
+            "CD276": "CD276 OR B7-H3 OR B7H3",
             # Nectin-4 的多种写法
             "Nectin-4": "Nectin-4 OR NECTIN4 OR PVRL4",
+            "NECTIN4": "NECTIN4 OR Nectin-4 OR PVRL4",
+            # TF / Tissue Factor
+            "TF": "TF OR \"Tissue Factor\"",
+            "Tissue Factor": "\"Tissue Factor\" OR TF",
+            # FOLR1
+            "FOLR1": "FOLR1 OR \"Folate receptor\" OR \"folate receptor alpha\"",
+            # CA125 / MUC16
+            "CA125": "CA125 OR MUC16",
+            "MUC16": "MUC16 OR CA125",
+            # pan-TRK / NTRK
+            "pan-TRK": "pan-TRK OR NTRK OR \"NTRK fusion\"",
+            "NTRK": "NTRK OR pan-TRK OR \"NTRK fusion\"",
             # BRCA 的多种写法
             "BRCA": "BRCA OR BRCA1 OR BRCA2",
         }
@@ -712,6 +795,15 @@ async def main() -> None:
         help="最大返回结果数（默认 50，上限 1000）",
     )
     parser.add_argument(
+        "--timeout",
+        type=float,
+        default=_TOTAL_BUDGET,
+        help=(
+            f"整次搜索的总时间预算，秒（默认 {_TOTAL_BUDGET:.0f}）；"
+            "用尽时主动停止并说明原因，而不是被宿主超时杀掉"
+        ),
+    )
+    parser.add_argument(
         "--json",
         action="store_true",
         help="以 JSON 格式输出（便于程序调用）",
@@ -731,6 +823,10 @@ async def main() -> None:
     # 限制最大结果数
     max_results = min(args.max_results, 1000)
 
+    if args.timeout <= 0:
+        print("错误: --timeout 必须是正数（秒）")
+        sys.exit(1)
+
     # 搜索参数展示（输出到 stderr，避免干扰 JSON 输出）
     out = print if not args.json else lambda *a, **kw: print(*a, **{**kw, "file": sys.stderr})
     out(f"\n🔍 搜索条件:")
@@ -744,9 +840,10 @@ async def main() -> None:
     if args.status:
         out(f"   状态: {args.status}")
     out(f"   最大结果数: {max_results}")
+    out(f"   总时间预算: {args.timeout:.0f}s")
     out(f"\n⏳ 正在搜索 ClinicalTrials.gov ...")
 
-    client = ClinicalTrialsSearch()
+    client = ClinicalTrialsSearch(total_budget=args.timeout)
     try:
         trials = await client.search(
             keyword=args.keyword,
@@ -758,6 +855,12 @@ async def main() -> None:
         )
     finally:
         await client.aclose()
+
+    if client.budget_exhausted:
+        out(
+            f"⚠️  已达总时间预算 {args.timeout:.0f}s，结果是部分结果；"
+            "如需更久请提高 --timeout（并给宿主工具足够的 timeoutMs）"
+        )
 
     if args.json:
         print(json.dumps(trials, ensure_ascii=False, indent=2))
